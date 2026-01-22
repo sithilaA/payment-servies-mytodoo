@@ -35,10 +35,26 @@ if (process.env.SWAGGER_ENABLED === 'true') {
 }
 
 // Health Check
-app.get('/health', (req, res) => res.json({ status: 'UP' }));
+// Health Check
+import { sequelize } from './config/database'; // Ensure sequelize is imported if not already in upper scope (it wasn't imported in app.ts, wait.. dbConnect is imported).
+// Need to import sequelize to check status.
+// Actually, let's just do it cleanly.
+
+app.get('/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.json({ status: 'UP', database: 'connected' });
+  } catch (error) {
+    res.status(503).json({ status: 'DOWN', database: 'disconnected' });
+  }
+});
+
+import { errorHandler } from './middlewares/errorHandler';
 
 app.use((req, res) => {
-    res.status(404).json({ error: 'Not Found' });
+  res.status(404).json({ status: 'error', code: 404, message: 'Not Found' });
 });
+
+app.use(errorHandler);
 
 export default app;

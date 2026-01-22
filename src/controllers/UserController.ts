@@ -1,24 +1,111 @@
 import { Request, Response } from 'express';
 import { walletService } from '../services/WalletService';
 import { serviceHandler } from '../utils';
+import { AppError } from '../utils/AppError';
 
 export class UserController {
   /**
    * Update Payout Details
    */
   static updatePayoutDetails = serviceHandler(async (req: Request, res: Response) => {
-      const { user_id, stripe_connect_account_id, role } = req.body;
-      
-      if (!user_id || !stripe_connect_account_id) {
-          throw new Error("Missing required fields");
+    const { user_id, stripe_connect_account_id, role } = req.body;
+
+    if (!user_id || !stripe_connect_account_id) {
+      throw new AppError("Missing required fields", 400);
+    }
+
+    // Find Wallet and Update
+    const wallet = await walletService.getOrCreate(user_id, user_id, role);
+    wallet.stripe_account_id = stripe_connect_account_id;
+    wallet.stripe_account_status = 'ACTIVE';
+    await wallet.save();
+
+    // TRIGGER PENDING PAYOUTS
+    try {
+      const { PendingPayout } = require('../models/PendingPayout');
+      const { stripeService } = require('../services/StripeService');
+      const { Payout } = require('../models/Payout');
+      const { logger } = require('../utils/logger');
+      const { settings } = require('../config/settings');
+
+      const pendingPayouts = await PendingPayout.findAll({
+        where: { user_id, status: 'PENDING' }
+      });
+
+      let processedCount = 0;
+      let failCount = 0;
+
+      if (pendingPayouts.length > 0) {
+        logger.info(`Found ${pendingPayouts.length} pending payouts for user ${user_id}. Processing...`);
+
+        for (const payout of pendingPayouts) {
+          try {
+            // Check available balance? 
+            // Logic: We assume the balance sits in the wallet because we moved it to Available in PaymentService.
+            // We should check wallet again to be safe.
+            await wallet.reload();
+            const amountToPay = Number(payout.amount); // Or wallet.available_balance
+
+            // Security: Cannot pay more than available balance.
+            if (Number(wallet.available_balance) >= amountToPay) {
+
+              const transfer = await stripeService.createTransfer({
+                amount: amountToPay,
+                currency: payout.currency,
+                destinationAccountId: stripe_connect_account_id,
+                transferGroup: payout.task_id,
+                description: `Delayed Payout for Task ${payout.task_id}`,
+                metadata: {
+                  task_id: payout.task_id,
+                  tasker_id: user_id,
+                  type: 'delayed_task_payout'
+                }
+              });
+
+              // Deduct
+              await wallet.decrement('available_balance', { by: amountToPay });
+
+              // Record Success
+              await Payout.create({
+                external_user_id: user_id,
+                wallet_id: wallet.id,
+                amount: amountToPay,
+                currency: payout.currency,
+                method: 'BANK',
+                status: 'COMPLETED',
+                stripe_payout_id: transfer.id,
+                related_task_id: payout.task_id,
+                details: { destination: stripe_connect_account_id, delayed: true }
+              });
+
+              // Update Pending Record
+              payout.status = 'PROCESSED';
+              await payout.save();
+
+              logger.info(`Processed pending payout ${payout.id}`);
+              processedCount++;
+            } else {
+              logger.warn(`Insufficient balance for pending payout ${payout.id}. Wallet: ${wallet.available_balance}, Req: ${amountToPay}`);
+              failCount++;
+            }
+
+          } catch (err: any) {
+            logger.error(`Failed to process pending payout ${payout.id}`, { error: err });
+            failCount++;
+          }
+        }
       }
 
-      // Find Wallet and Update
-      const wallet = await walletService.getOrCreate(user_id, user_id, role);
-      wallet.stripe_account_id = stripe_connect_account_id;
-      wallet.stripe_account_status = 'ACTIVE'; // Assume active for now
-      await wallet.save();
+      // Add summary to response if needed, for now we just log.
+      if (processedCount > 0 || failCount > 0) {
+        logger.info(`Payout Retry Summary: ${processedCount} Success, ${failCount} Failed.`);
+      }
 
-      res.json({ success: true, message: "Payout details updated" });
+    } catch (e) {
+      // Do not block the User Update response
+      console.error('Error processing pending payouts hook', e);
+    }
+
+    res.json({ success: true, message: "Payout details updated and pending payouts triggered." });
   });
 }

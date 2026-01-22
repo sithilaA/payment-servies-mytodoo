@@ -60,4 +60,10 @@ export class Payout extends Model {
     allowNull: true
   })
   stripe_payout_id?: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true
+  })
+  related_task_id?: string;
 }

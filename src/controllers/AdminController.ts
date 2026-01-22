@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StripeErrorCode } from '../models/StripeErrorCode';
 import { serviceHandler } from '../utils';
 import { payoutRetryService } from '../services/PayoutRetryService';
+import { AppError } from '../utils/AppError';
 
 export class AdminController {
 
@@ -10,8 +11,8 @@ export class AdminController {
      */
     static addStripeErrorCode = serviceHandler(async (req: Request, res: Response) => {
         const { error_code, description } = req.body;
-        
-        if (!error_code) throw new Error("error_code is required");
+
+        if (!error_code) throw new AppError("error_code is required", 400);
 
         const entry = await StripeErrorCode.create({
             error_code,

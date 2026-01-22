@@ -6,6 +6,7 @@ import { ledgerService } from './LedgerService';
 import { sequelize } from '../config/database';
 import { logger } from '../utils/logger';
 import { settings } from '../config/settings';
+import { AppError } from '../utils/AppError';
 
 export class PaymentService {
 
@@ -21,11 +22,11 @@ export class PaymentService {
         task_id: string;
     }) {
         const { task_price, commission, service_fee, tasker_id, poster_id, task_id } = data;
-        
+
         // Check for existing payment properly (Idempotency / Unique Constraint Logic)
         const existingPayment = await Payment.findOne({ where: { related_task_id: task_id } });
         if (existingPayment) {
-             throw new Error("Payment already exists for this task."); // 409 Conflict handled by controller/middleware usually
+            throw new AppError("Payment already exists for this task.", 409);
         }
 
         const transaction = await sequelize.transaction();
@@ -50,7 +51,7 @@ export class PaymentService {
             // 3. Update Tasker Pending Balance
             const taskerWallet = await walletService.getOrCreate(tasker_id, tasker_id, 'service_provider', transaction);
             // Removed check for !taskerWallet because getOrCreate always returns one.
-            
+
             await taskerWallet.increment('pending_balance', { by: taskerPendingAmount, transaction });
 
             // 4. Update Company Pending Balance
@@ -62,7 +63,7 @@ export class PaymentService {
             await companyAccount.increment('pending_balance', { by: companyPendingAmount, transaction });
 
             // 5. Ledger Entries (PENDING)
-            
+
             // a. Tasker Credit (Pending)
             await ledgerService.record({
                 toWalletId: taskerWallet.id,
@@ -86,12 +87,12 @@ export class PaymentService {
             });
 
             await transaction.commit();
-            
-            logger.info('Task Payment Created (Funds Held)', { 
-                taskId: task_id, 
-                posterId: poster_id, 
+
+            logger.info('Task Payment Created (Funds Held)', {
+                taskId: task_id,
+                posterId: poster_id,
                 taskerId: tasker_id,
-                totalAmount 
+                totalAmount
             });
 
             return {
@@ -124,7 +125,7 @@ export class PaymentService {
         const transaction = await sequelize.transaction();
         try {
             // Find Payment associated with Task
-            const payment = await Payment.findOne({ 
+            const payment = await Payment.findOne({
                 where: { related_task_id: task_id, status: 'PENDING' },
                 transaction
             });
@@ -132,11 +133,11 @@ export class PaymentService {
             if (!payment) {
                 // If not found in PENDING, maybe checks status?
                 // For this strict flow, we expect it to be pending.
-                throw new Error('No pending payment found for this task.');
+                throw new AppError('No pending payment found for this task.', 404);
             }
 
             // Security check
-            // if (payment.user_id !== poster_id) throw new Error('Poster ID mismatch');
+            // if (payment.user_id !== poster_id) throw new AppError('Poster ID mismatch', 403);
 
             const taskerPendingAmount = Number(payment.amount) - Number(payment.service_fee) - Number(payment.commission);
             const companyPendingAmount = Number(payment.commission) + Number(payment.service_fee);
@@ -147,23 +148,17 @@ export class PaymentService {
                 transaction
             }));
 
-            if (!taskerLedgerEntry?.to_wallet_id) throw new Error('Tasker wallet trace failed.');
+            if (!taskerLedgerEntry?.to_wallet_id) throw new AppError('Tasker wallet trace failed.', 500);
             const taskerWallet = await Wallet.findByPk(taskerLedgerEntry.to_wallet_id, { transaction });
-            if (!taskerWallet) throw new Error('Tasker wallet not found.');
+            if (!taskerWallet) throw new AppError('Tasker wallet not found.', 404);
 
             const companyAccount = await PlatformAccount.findOne({ transaction });
-            if (!companyAccount) throw new Error('Company account not found.');
+            if (!companyAccount) throw new AppError('Company account not found.', 500);
 
             // --- Handlers ---
 
             if (action === 'COMPLETE') {
-                
-                // 1. Pre-Check: Tasker must have valid Stripe Account
-                if (!taskerWallet.stripe_account_id) {
-                     throw new Error('Tasker has no linked Stripe Connect account. Cannot release funds.');
-                }
-                
-                // 2. Internal Move: Pending -> Available
+                // 1. Internal Move: Pending -> Available
                 await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
                 await taskerWallet.increment('available_balance', { by: taskerPendingAmount, transaction });
 
@@ -171,52 +166,118 @@ export class PaymentService {
                 await companyAccount.increment('balance', { by: companyPendingAmount, transaction });
                 await companyAccount.increment('total_revenue', { by: companyPendingAmount, transaction });
 
-                // 3. Stripe Payout (Tasker)
-                try {
-                    // Check for negative balance logic
-                    // If available_balance < taskerPendingAmount (was negative), we payout LESS.
-                    
-                    // Reload to get fresh balance after increment
-                    await taskerWallet.reload({ transaction });
-                    const payoutAmount = Number(taskerWallet.available_balance);
+                let responseMessage = 'Task completed, funds released to Stripe Connect account.';
+                let responseStatus = 'COMPLETED';
 
-                    if (payoutAmount > 0) {
-                        await import('./StripeService').then(m => m.stripeService.createTransfer({
-                            amount: payoutAmount,
-                            currency: settings.currency,
-                            destinationAccountId: taskerWallet.stripe_account_id!,
-                            transferGroup: task_id,
-                            description: `Payout for Task ${task_id}`,
-                            metadata: {
-                                task_id,
-                                poster_id,
-                                tasker_id: taskerWallet.external_user_id,
-                                type: 'task_payout'
-                            }
-                        }));
-                        
-                        // Update Wallet (Deduct Payout)
-                        await taskerWallet.decrement('available_balance', { by: payoutAmount, transaction });
-                        
-                        logger.info('Stripe Payout Triggered', { task_id, amount: payoutAmount, stripe_acc: taskerWallet.stripe_account_id });
-                    }
-                } catch (stripeErr: any) {
-                    logger.error('Stripe Payout Failed', { stripeErr });
-                    
-                    // SAVE FAILURE RECORD INDEPENDENTLY (No Transaction, so it persists even after rollback)
-                    // "Store failed payouts, keep funds pending" -> Rollback will keep funds pending.
-                    await import('./PayoutRetryService').then(m => m.payoutRetryService.checkAndQueue({
-                        taskId: task_id,
-                        userId: taskerWallet.external_user_id,
-                        stripeAccountId: taskerWallet.stripe_account_id!,
-                        amount: Number(taskerWallet.available_balance), // Amount we TRIED to pay
+                // 2. Process Payout OR Queue if Account Missing
+                if (!taskerWallet.stripe_account_id) {
+                    // A. ACCOUNT MISSING -> QUEUE PAYOUT
+                    await import('../models/PendingPayout').then(m => m.PendingPayout.create({
+                        task_id,
+                        user_id: taskerWallet.external_user_id,
+                        amount: taskerPendingAmount,
                         currency: settings.currency,
-                        error: stripeErr,
-                        transaction: null // IMPORTANT: Do not include in the main transaction that will rollback
-                    }));
+                        status: 'PENDING'
+                    }, { transaction }));
 
-                    // RE-THROW to trigger rollback of funds/status
-                    throw stripeErr;
+                    responseStatus = 'PAYOUT_QUEUED';
+                    responseMessage = 'Stripe Connect account not found. Payout saved as pending.';
+
+                    logger.info('Payout Queued (Missing Stripe Account)', { task_id, amount: taskerPendingAmount });
+
+                    // Send Queued Alert
+                    if (process.env.EMAIL_ALERTS_ENABLED !== 'false') {
+                        try {
+                            const fs = require('fs');
+                            const path = require('path');
+                            const configPath = path.resolve(__dirname, '../../alert-config.json');
+
+                            if (fs.existsSync(configPath)) {
+                                const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                                let recipients = config.dbFailureAlertEmails || config.dbFailureAlertEmail;
+                                if (!Array.isArray(recipients)) recipients = [recipients];
+                                if (recipients && recipients.length > 0) {
+                                    const { emailService } = require('./EmailService');
+                                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                                    const subject = `Action Required: Payout Queued [${timestamp}]`;
+                                    const body = `
+Dear Admin,
+
+A payout has been QUEUED for the following task because the Tasker has no linked Stripe Connect account.
+
+Details:
+- Task Reference: ${task_id}
+- User ID: ${taskerWallet.external_user_id}
+- Username: ${taskerWallet.external_username}
+- Pending Amount: ${taskerPendingAmount} ${settings.currency}
+
+The payout will be automatically triggered when the user updates their payment details.
+                                     `;
+                                    logger.info('Initiating alert email for Queued Payout.', { recipients });
+                                    emailService.sendEmail(recipients, subject, body).catch((e: any) => logger.error("Email send failed (Async)", { error: e }));
+                                }
+                            }
+                        } catch (e) {
+                            logger.error('Failed to send queued payout alert email', { error: e });
+                        }
+                    }
+
+                } else {
+                    // B. ACCOUNT EXISTS -> PAYOUT
+                    try {
+                        // Reload to get fresh balance after increment
+                        await taskerWallet.reload({ transaction });
+                        const payoutAmount = Number(taskerWallet.available_balance);
+
+                        if (payoutAmount > 0) {
+                            const transfer = await import('./StripeService').then(m => m.stripeService.createTransfer({
+                                amount: payoutAmount,
+                                currency: settings.currency,
+                                destinationAccountId: taskerWallet.stripe_account_id!,
+                                transferGroup: task_id,
+                                description: `Payout for Task ${task_id}`,
+                                metadata: {
+                                    task_id,
+                                    poster_id,
+                                    tasker_id: taskerWallet.external_user_id,
+                                    type: 'task_payout'
+                                }
+                            }));
+
+                            // Update Wallet (Deduct Payout)
+                            await taskerWallet.decrement('available_balance', { by: payoutAmount, transaction });
+
+                            // Log Payout in DB
+                            await import('../models/Payout').then(m => m.Payout.create({
+                                external_user_id: taskerWallet.external_user_id,
+                                wallet_id: taskerWallet.id,
+                                amount: payoutAmount,
+                                currency: settings.currency,
+                                method: 'BANK',
+                                status: 'COMPLETED',
+                                stripe_payout_id: transfer.id,
+                                related_task_id: task_id,
+                                details: { destination: taskerWallet.stripe_account_id }
+                            }, { transaction }));
+
+                            logger.info('Stripe Payout Triggered & Saved', { task_id, amount: payoutAmount, stripe_acc: taskerWallet.stripe_account_id });
+                        }
+                    } catch (stripeErr: any) {
+                        logger.error('Stripe Payout Failed', { stripeErr });
+
+                        // SAVE FAILURE RECORD INDEPENDENTLY
+                        await import('./PayoutRetryService').then(m => m.payoutRetryService.checkAndQueue({
+                            taskId: task_id,
+                            userId: taskerWallet.external_user_id,
+                            stripeAccountId: taskerWallet.stripe_account_id!,
+                            amount: Number(taskerWallet.available_balance),
+                            currency: settings.currency,
+                            error: stripeErr,
+                            transaction: null
+                        }));
+
+                        throw stripeErr;
+                    }
                 }
 
                 // 3. Update Statuses
@@ -228,15 +289,15 @@ export class PaymentService {
                 await payment.save({ transaction });
 
                 await transaction.commit();
-                return { success: true, status: 'COMPLETED' };
+                return { success: true, status: responseStatus, message: responseMessage };
 
             } else if (action === 'CANCEL' || action === 'REFUND_FULL') {
                 // Scenario 3: Normal Refund (Reverse everything)
                 // "Refund the full amount to the Poster. No service fee kept. No tasker penalty. Reverse all."
-                
+
                 // 1. Stripe Refund (Full)
                 if (payment.stripe_payment_intent_id) {
-                     await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                    await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
                 }
 
                 // 2. Reverse Pending
@@ -271,16 +332,10 @@ export class PaymentService {
                 // 3. Company Pending Logic
                 // "Keep the service fee as company income."
                 // Company Pending was (Commission + Fee).
-                // We keep Fee. We lose Commission (since task didn't happen)?
-                // Usually commission is % of task price. If task refunded, commission is lost.
-                // So we release Fee to Available, and Reverse Commission.
-                
+                // We keep Fee. We lose Commission.
                 const commissionPart = Number(payment.commission);
                 const feePart = Number(payment.service_fee);
 
-                // Reverse Commission from Pending
-                // Actually companyPendingAmount = commission + fee.
-                // To Keep Fee: decrement pending by Total, increment Balance by Fee.
                 await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
                 await companyAccount.increment('balance', { by: feePart, transaction });
                 await companyAccount.increment('total_revenue', { by: feePart, transaction });
@@ -288,7 +343,7 @@ export class PaymentService {
                 // 4. Statuses
                 payment.status = 'REFUNDED';
                 await payment.save({ transaction });
-                
+
                 await transaction.commit();
                 return { success: true, status: 'REFUNDED_KEEP_FEE' };
 
@@ -297,8 +352,8 @@ export class PaymentService {
                 // "Refund 100% ... Apply commission amount as negative balance to Tasker."
 
                 // 1. Stripe Refund (Full)
-                 if (payment.stripe_payment_intent_id) {
-                     await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                if (payment.stripe_payment_intent_id) {
+                    await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
                 }
 
                 // 2. Reverse Pending
@@ -306,7 +361,6 @@ export class PaymentService {
                 await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
 
                 // 3. Apply Penalty to Tasker
-                // "Commission amount as negative balance"
                 const penalty = Number(payment.commission);
                 await taskerWallet.decrement('available_balance', { by: penalty, transaction }); // Goes negative
 
@@ -322,7 +376,7 @@ export class PaymentService {
                 return { success: true, status: 'REFUNDED_WITH_PENALTY' };
 
             } else {
-                throw new Error('Invalid action.');
+                throw new AppError('Invalid action.', 400);
             }
 
         } catch (error) {
