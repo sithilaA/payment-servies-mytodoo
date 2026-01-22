@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
 import { serviceHandler } from '../utils';
+import { AppError } from '../middlewares/errorHandler';
 
 export class PaymentController {
   
@@ -12,27 +13,19 @@ export class PaymentController {
     
     // Basic validation
     if (!task_price || !tasker_id || !poster_id || !task_id) {
-         throw new Error("Missing required fields");
+         throw new AppError("Missing required fields", 400);
     }
 
     // Call Service
-    try {
-        const result = await PaymentService.createTaskPayment({
-            task_price,
-            commission: commission || 0,
-            service_fee: service_fee || 0,
-            tasker_id,
-            poster_id,
-            task_id
-        });
-        res.json(result);
-    } catch (e: any) {
-        if (e.message.includes("Payment already exists")) {
-            res.status(409).json({ error: e.message });
-            return;
-        }
-        throw e; // Pass to global handler
-    }
+    const result = await PaymentService.createTaskPayment({
+        task_price,
+        commission: commission || 0,
+        service_fee: service_fee || 0,
+        tasker_id,
+        poster_id,
+        task_id
+    });
+    res.json(result);
   });
 
   /**
@@ -42,36 +35,14 @@ export class PaymentController {
      const { task_id, poster_id, action } = req.body;
      
      if (!task_id || !poster_id || !action) {
-         throw new Error("Missing required fields: task_id, poster_id, action");
+         throw new AppError("Missing required fields: task_id, poster_id, action", 400);
      }
 
-     try {
-         const result = await PaymentService.handleTaskAction({
-             task_id,
-             poster_id,
-             action
-         });
-         res.json(result);
-     } catch (e: any) {
-         if (e.message.includes("Tasker has no linked Stripe Connect account")) {
-             res.status(400).json({ 
-                 status: "error",
-                 code: "MISSING_STRIPE_ACCOUNT",
-                 message: e.message 
-             });
-             return;
-         }
-         if (e.message.includes("insufficient available funds")) {
-             res.status(400).json({
-                 status: "error",
-                 code: "STRIPE_INSUFFICIENT_FUNDS",
-                 message: "Platform Stripe account has insufficient available balance to process this payout. Please trigger a deposit in Stripe Dashboard."
-             });
-             return;
-         }
-         throw e;
-     }
+     const result = await PaymentService.handleTaskAction({
+         task_id,
+         poster_id,
+         action
+     });
+     res.json(result);
   });
-
-  // Removed old endpoints (initiate, handleWebhook) as requested.
 }

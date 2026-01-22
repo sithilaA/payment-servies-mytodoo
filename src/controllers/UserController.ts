@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { walletService } from '../services/WalletService';
 import { serviceHandler } from '../utils';
+import { AppError } from '../middlewares/errorHandler';
 
 export class UserController {
   /**
@@ -10,7 +11,7 @@ export class UserController {
       const { user_id, stripe_connect_account_id, role } = req.body;
       
       if (!user_id || !stripe_connect_account_id) {
-          throw new Error("Missing required fields");
+          throw new AppError("Missing required fields", 400);
       }
 
       // Find Wallet and Update

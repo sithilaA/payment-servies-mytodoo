@@ -34,11 +34,17 @@ if (process.env.SWAGGER_ENABLED === 'true') {
   console.log('Swagger Docs available at /api-docs');
 }
 
+import { errorHandler } from './middlewares/errorHandler';
+
 // Health Check
 app.get('/health', (req, res) => res.json({ status: 'UP' }));
 
-app.use((req, res) => {
+// 404 Handler
+app.use((req, res, next) => {
     res.status(404).json({ error: 'Not Found' });
 });
+
+// Global Error Handler
+app.use(errorHandler);
 
 export default app;

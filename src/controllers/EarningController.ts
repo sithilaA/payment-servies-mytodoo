@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
 import { earningService } from '../services/EarningService';
 import { walletService } from '../services/WalletService';
+import { serviceHandler } from '../utils';
+import { AppError } from '../middlewares/errorHandler';
 
 export class EarningController {
   
-  static async recordEarning(req: Request, res: Response) {
-    try {
+  static recordEarning = serviceHandler(async (req: Request, res: Response) => {
       // Input from Main Backend
       const { 
           external_user_id, 
@@ -17,7 +18,7 @@ export class EarningController {
       } = req.body;
         
       if (!external_user_id || !task_price) {
-          return res.status(400).json({ error: "Missing required fields" });
+          throw new AppError("Missing required fields", 400);
       }
 
       const earning = await earningService.recordEarning({
@@ -29,26 +30,19 @@ export class EarningController {
           transaction_ref
       });
 
-      return res.json({ success: true, earning });
+      res.json({ success: true, earning });
+  });
 
-    } catch (error: any) {
-      console.error(error);
-      return res.status(500).json({ error: error.message });
-    }
-  }
-
-  static async getBalance(req: Request, res: Response) {
-      try {
-          const { userId } = req.params;
-          const wallet = await walletService.getBalance(userId as string);
-          if (!wallet) return res.status(404).json({ error: "Wallet not found" });
-          return res.json({ 
-              available: wallet.available_balance, 
-              pending: wallet.pending_balance,
-              currency: wallet.currency
-          });
-      } catch (error) {
-          return res.status(500).json({ error: "Internal Error" });
-      }
-  }
+  static getBalance = serviceHandler(async (req: Request, res: Response) => {
+      const { userId } = req.params;
+      const wallet = await walletService.getBalance(userId as string);
+      
+      if (!wallet) throw new AppError("Wallet not found", 404);
+      
+      res.json({ 
+          available: wallet.available_balance, 
+          pending: wallet.pending_balance,
+          currency: wallet.currency
+      });
+  });
 }

@@ -6,6 +6,7 @@ import { ledgerService } from './LedgerService';
 import { sequelize } from '../config/database';
 import { logger } from '../utils/logger';
 import { settings } from '../config/settings';
+import { AppError } from '../middlewares/errorHandler';
 
 export class PaymentService {
 
@@ -25,7 +26,7 @@ export class PaymentService {
         // Check for existing payment properly (Idempotency / Unique Constraint Logic)
         const existingPayment = await Payment.findOne({ where: { related_task_id: task_id } });
         if (existingPayment) {
-             throw new Error("Payment already exists for this task."); // 409 Conflict handled by controller/middleware usually
+             throw new AppError("Payment already exists for this task.", 409);
         }
 
         const transaction = await sequelize.transaction();
@@ -105,7 +106,10 @@ export class PaymentService {
 
         } catch (error) {
             await transaction.rollback();
-            logger.error('Create Task Payment Failed', { error, data });
+            // Don't log here if you want cleaner logs, or log as debug. 
+            // The controller/middleware will log the final error. 
+            // But preserving context is good.
+            // logger.error('Create Task Payment Failed', { error, data }); 
             throw error;
         }
     }
@@ -130,9 +134,7 @@ export class PaymentService {
             });
 
             if (!payment) {
-                // If not found in PENDING, maybe checks status?
-                // For this strict flow, we expect it to be pending.
-                throw new Error('No pending payment found for this task.');
+                throw new AppError('No pending payment found for this task.', 404);
             }
 
             // Security check
@@ -147,12 +149,12 @@ export class PaymentService {
                 transaction
             }));
 
-            if (!taskerLedgerEntry?.to_wallet_id) throw new Error('Tasker wallet trace failed.');
+            if (!taskerLedgerEntry?.to_wallet_id) throw new AppError('Tasker wallet trace failed.', 500);
             const taskerWallet = await Wallet.findByPk(taskerLedgerEntry.to_wallet_id, { transaction });
-            if (!taskerWallet) throw new Error('Tasker wallet not found.');
+            if (!taskerWallet) throw new AppError('Tasker wallet not found.', 404);
 
             const companyAccount = await PlatformAccount.findOne({ transaction });
-            if (!companyAccount) throw new Error('Company account not found.');
+            if (!companyAccount) throw new AppError('Company account not found.', 500);
 
             // --- Handlers ---
 
@@ -160,7 +162,7 @@ export class PaymentService {
                 
                 // 1. Pre-Check: Tasker must have valid Stripe Account
                 if (!taskerWallet.stripe_account_id) {
-                     throw new Error('Tasker has no linked Stripe Connect account. Cannot release funds.');
+                     throw new AppError('Tasker has no linked Stripe Connect account. Cannot release funds.', 400);
                 }
                 
                 // 2. Internal Move: Pending -> Available
@@ -214,6 +216,10 @@ export class PaymentService {
                         error: stripeErr,
                         transaction: null // IMPORTANT: Do not include in the main transaction that will rollback
                     }));
+                    
+                    if (stripeErr.type === 'StripeInvalidRequestError' && stripeErr.message.includes('insufficient available balance')) {
+                        throw new AppError("Platform Stripe account has insufficient available balance.", 400);
+                    }
 
                     // RE-THROW to trigger rollback of funds/status
                     throw stripeErr;
@@ -322,12 +328,12 @@ export class PaymentService {
                 return { success: true, status: 'REFUNDED_WITH_PENALTY' };
 
             } else {
-                throw new Error('Invalid action.');
+                throw new AppError('Invalid action.', 400);
             }
 
         } catch (error) {
             await transaction.rollback();
-            logger.error('Task Action Failed', { error, data });
+            // logger.error('Task Action Failed', { error, data }); // Let global handler log it
             throw error;
         }
     }
