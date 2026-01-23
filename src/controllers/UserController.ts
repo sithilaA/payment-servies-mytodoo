@@ -23,6 +23,7 @@ export class UserController {
     // TRIGGER PENDING PAYOUTS
     try {
       const { PendingPayout } = require('../models/PendingPayout');
+      const { FailedPayout } = require('../models/FailedPayout');
       const { stripeService } = require('../services/StripeService');
       const { Payout } = require('../models/Payout');
       const { logger } = require('../utils/logger');
@@ -91,6 +92,30 @@ export class UserController {
 
           } catch (err: any) {
             logger.error(`Failed to process pending payout ${payout.id}`, { error: err });
+
+            // Handle Insufficient Funds specifically
+            const errorCode = err.raw?.code || err.code;
+            if (errorCode === 'balance_insufficient') {
+              try {
+                await FailedPayout.create({
+                  task_id: payout.task_id,
+                  user_id: user_id,
+                  stripe_connect_account_id: stripe_connect_account_id,
+                  amount: Number(payout.amount),
+                  currency: payout.currency,
+                  error_code: errorCode,
+                  last_error_message: err.message,
+                  status: 'PENDING'
+                });
+
+                payout.status = 'FAILED';
+                await payout.save();
+                logger.info(`Moved payout ${payout.id} to FailedPayouts due to insufficient funds.`);
+              } catch (innerErr) {
+                logger.error(`Failed to create FailedPayout record for ${payout.id}`, innerErr);
+              }
+            }
+
             failCount++;
           }
         }
