@@ -170,4 +170,67 @@ router.get('/admin/company-account', CompanyController.getStats);
 // - /refunds 
 // These are removed from the router as per redesign instructions.
 
+// --- Admin Review Endpoints ---
+
+/**
+ * @swagger
+ * /admin/payouts/review:
+ *   get:
+ *     summary: Get Failed Payouts for Admin Review
+ *     description: Returns all failed payout requests that require admin intervention (unknown error codes).
+ *     tags: [Admin]
+ *     responses:
+ *       200:
+ *         description: List of payouts requiring review
+ */
+router.get('/admin/payouts/review', AdminController.getReviewPayouts);
+
+/**
+ * @swagger
+ * /admin/payouts/review/{id}:
+ *   put:
+ *     summary: Update Failed Payout Details (Admin)
+ *     description: Allows admin to update ONLY the stripe_connect_account_id field.
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [stripe_connect_account_id]
+ *             properties:
+ *               stripe_connect_account_id: { type: string }
+ *     responses:
+ *       200: { description: Updated successfully }
+ *       404: { description: Request not found }
+ */
+router.put('/admin/payouts/review/:id', AdminController.updateReviewPayout);
+
+/**
+ * @swagger
+ * /admin/payouts/review/{id}/retry:
+ *   post:
+ *     summary: Retry Failed Payout from Admin Review
+ *     description: Manually execute the payout after admin has reviewed and potentially updated the stripe_account_id.
+ *     tags: [Admin]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200: { description: Payout processed successfully }
+ *       400: { description: Retry failed }
+ *       404: { description: Request not found }
+ */
+router.post('/admin/payouts/review/:id/retry', AdminController.retryReviewPayout);
+
 export default router;

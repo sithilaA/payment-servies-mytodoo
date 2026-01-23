@@ -276,7 +276,9 @@ The payout will be automatically triggered when the user updates their payment d
                             transaction: null
                         }));
 
-                        throw stripeErr;
+                        // Re-throw as AppError to return exact reason to client
+                        const errorMessage = stripeErr.message || "Stripe payout failed";
+                        throw new AppError(errorMessage, 502); // 502 Bad Gateway is appropriate for upstream failure, or 400.
                     }
                 }
 

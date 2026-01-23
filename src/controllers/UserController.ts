@@ -93,28 +93,73 @@ export class UserController {
           } catch (err: any) {
             logger.error(`Failed to process pending payout ${payout.id}`, { error: err });
 
-            // Handle Insufficient Funds specifically
-            const errorCode = err.raw?.code || err.code;
-            if (errorCode === 'balance_insufficient') {
-              try {
-                await FailedPayout.create({
-                  task_id: payout.task_id,
-                  user_id: user_id,
-                  stripe_connect_account_id: stripe_connect_account_id,
-                  amount: Number(payout.amount),
-                  currency: payout.currency,
-                  error_code: errorCode,
-                  last_error_message: err.message,
-                  status: 'PENDING'
-                });
+            // Handle Payout Failures
+            const errorCode = err.raw?.code || err.code || 'UNKNOWN_ERROR';
+            const { StripeErrorCode } = require('../models/StripeErrorCode');
+            const { FailedRequestAdminReview } = require('../models/FailedRequestAdminReview');
 
-                payout.status = 'FAILED';
-                await payout.save();
-                logger.info(`Moved payout ${payout.id} to FailedPayouts due to insufficient funds.`);
+            // Check if error is in allowed list
+            const isKnownError = await StripeErrorCode.findOne({ where: { error_code: errorCode } });
+
+            if (isKnownError) {
+              // KNOWN ERROR -> FailedPayout
+              try {
+                const existingFail = await FailedPayout.findOne({ where: { task_id: payout.task_id } });
+
+                if (existingFail) {
+                  existingFail.status = 'PENDING';
+                  existingFail.error_code = errorCode;
+                  existingFail.last_error_message = err.message;
+                  // existingFail.retry_count // Optional: reset or keep? 
+                  await existingFail.save();
+                  logger.info(`Updated existing FailedPayout for ${payout.id} (Known Error: ${errorCode})`);
+                } else {
+                  await FailedPayout.create({
+                    task_id: payout.task_id,
+                    user_id: user_id,
+                    stripe_connect_account_id: stripe_connect_account_id,
+                    amount: Number(payout.amount),
+                    currency: payout.currency,
+                    error_code: errorCode,
+                    last_error_message: err.message,
+                    status: 'PENDING'
+                  });
+                  logger.info(`Created new FailedPayout for ${payout.id} (Known Error: ${errorCode})`);
+                }
               } catch (innerErr) {
-                logger.error(`Failed to create FailedPayout record for ${payout.id}`, innerErr);
+                logger.error(`Failed to record FailedPayout for ${payout.id}`, innerErr);
+              }
+            } else {
+              // UNKNOWN ERROR -> Admin Review
+              try {
+                const existingReview = await FailedRequestAdminReview.findOne({ where: { task_id: payout.task_id } });
+
+                if (existingReview) {
+                  existingReview.status = 'ADMIN_REVIEW_REQUIRED'; // Re-open if it was previously processed or something?
+                  existingReview.error_code = errorCode;
+                  existingReview.last_error_message = err.message;
+                  await existingReview.save();
+                  logger.warn(`Updated existing Admin Review Request for ${payout.id} (Unknown Error: ${errorCode})`);
+                } else {
+                  await FailedRequestAdminReview.create({
+                    task_id: payout.task_id,
+                    user_id: user_id,
+                    stripe_connect_account_id: stripe_connect_account_id,
+                    amount: Number(payout.amount),
+                    currency: payout.currency,
+                    error_code: errorCode,
+                    last_error_message: err.message
+                  });
+                  logger.warn(`Created new Admin Review Request for ${payout.id} (Unknown Error: ${errorCode})`);
+                }
+              } catch (innerErr) {
+                logger.error(`Failed to record FailedRequestAdminReview for ${payout.id}`, innerErr);
               }
             }
+
+            // Always mark the PendingPayout as FAILED so we don't loop endlessly
+            payout.status = 'FAILED';
+            await payout.save();
 
             failCount++;
           }
