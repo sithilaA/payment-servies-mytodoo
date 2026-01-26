@@ -13,6 +13,7 @@ import { PendingPayout } from '../models/PendingPayout';
 import { FailedRequestAdminReview } from '../models/FailedRequestAdminReview';
 import { StripeErrorCode } from '../models/StripeErrorCode';
 import { FailedPayout } from '../models/FailedPayout';
+import { FailedRefundRequest } from '../models/FailedRefundRequest';
 
 dotenv.config();
 
@@ -23,7 +24,7 @@ export const sequelize = new Sequelize({
   username: process.env.DB_USER || 'root',
   password: process.env.DB_PASS || 'password',
   database: process.env.DB_NAME || 'payment_service',
-  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview],
+  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview, FailedRefundRequest],
   logging: false, // Set to console.log to see SQL queries
   pool: {
     max: 5,
@@ -39,7 +40,9 @@ export const dbConnect = async (retries = 5, delay = 5000) => {
       await sequelize.authenticate();
       console.log('Database connection has been established successfully.');
       // Sync models only on successful connection
-      await sequelize.sync({ alter: true });
+      // NOTE: alter:true disabled due to MySQL 64 key limit error
+      // Run this SQL manually: ALTER TABLE transactions MODIFY COLUMN status ENUM('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING';
+      await sequelize.sync({ alter: false });
       return;
     } catch (error: any) {
       console.error(`Unable to connect to the database (Attempt ${i + 1}/${retries}):`, error.message);

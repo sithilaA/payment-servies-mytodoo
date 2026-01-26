@@ -48,14 +48,14 @@ export class Transaction extends Model {
 
   @Column({
     type: DataType.ENUM(
-      'DEPOSIT', 
-      'PAYMENT', 
-      'FEE', 
-      'STRIPE_CHARGE', 
-      'TRANSFER', 
-      'ESCROW_LOCK', 
-      'ESCROW_RELEASE', 
-      'PAYOUT', 
+      'DEPOSIT',
+      'PAYMENT',
+      'FEE',
+      'STRIPE_CHARGE',
+      'TRANSFER',
+      'ESCROW_LOCK',
+      'ESCROW_RELEASE',
+      'PAYOUT',
       'REFUND',
       'EARNING',
       'COMMISSION',
@@ -68,7 +68,7 @@ export class Transaction extends Model {
 
   @Default('PENDING')
   @Column({
-    type: DataType.ENUM('PENDING', 'COMPLETED', 'FAILED'),
+    type: DataType.ENUM('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'),
     allowNull: false
   })
   status!: string;

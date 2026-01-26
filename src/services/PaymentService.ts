@@ -1,12 +1,46 @@
 import { Payment } from '../models/Payment';
 import { Wallet } from '../models/Wallet';
 import { PlatformAccount } from '../models/PlatformAccount';
+import { FailedRefundRequest } from '../models/FailedRefundRequest';
 import { walletService } from './WalletService';
 import { ledgerService } from './LedgerService';
 import { sequelize } from '../config/database';
 import { logger } from '../utils/logger';
 import { settings } from '../config/settings';
 import { AppError } from '../utils/AppError';
+
+// Helper to record failed refund requests
+async function recordFailedRefund(data: {
+    payment: any;
+    task_id: string;
+    user_id: string;
+    amount: number;
+    action: string;
+    error: any;
+}): Promise<void> {
+    try {
+        await FailedRefundRequest.create({
+            payment_id: data.payment.id,
+            task_id: data.task_id,
+            user_id: data.user_id,
+            amount: data.amount,
+            currency: data.payment.currency || settings.currency,
+            stripe_payment_intent_id: data.payment.stripe_payment_intent_id,
+            action: data.action,
+            error_code: data.error.code || data.error.name || 'UNKNOWN',
+            error_message: data.error.message || JSON.stringify(data.error),
+            status: 'PENDING',
+            retry_count: 0
+        });
+        logger.info('Failed refund recorded for admin review', {
+            task_id: data.task_id,
+            payment_id: data.payment.id,
+            action: data.action
+        });
+    } catch (recordErr) {
+        logger.error('Failed to record failed refund request', { recordErr, data });
+    }
+}
 
 export class PaymentService {
 
@@ -20,8 +54,9 @@ export class PaymentService {
         tasker_id: string; // External User ID
         poster_id: string; // External User ID
         task_id: string;
+        payment_intent?: string; // Stripe Payment Intent ID (optional)
     }) {
-        const { task_price, commission, service_fee, tasker_id, poster_id, task_id } = data;
+        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent } = data;
 
         // Check for existing payment properly (Idempotency / Unique Constraint Logic)
         const existingPayment = await Payment.findOne({ where: { related_task_id: task_id } });
@@ -36,16 +71,16 @@ export class PaymentService {
             const companyPendingAmount = Number(commission) + Number(service_fee);
             const totalAmount = Number(task_price) + Number(service_fee);
 
-            // 2. Mock Charge (In real life, integrated with Stripe here)
-            // Just recording the Payment entity as PENDING
+            // 2. Create Payment record with optional Stripe Payment Intent
             const payment = await Payment.create({
                 user_id: poster_id,
                 amount: totalAmount,
                 service_fee: service_fee,
                 commission: commission,
                 currency: settings.currency,
-                status: 'PENDING', // Payment itself is pending/held
-                related_task_id: task_id
+                status: 'PENDING',
+                related_task_id: task_id,
+                stripe_payment_intent_id: payment_intent || null
             }, { transaction });
 
             // 3. Update Tasker Pending Balance
@@ -110,14 +145,13 @@ export class PaymentService {
             throw error;
         }
     }
-
     /**
-     * Endpoint 2: Task Action (Complete or Cancel)
+     * Endpoint 2: Task Action (Complete or Cancel/Refund)
      */
     static async handleTaskAction(data: {
         task_id: string;
         poster_id: string;
-        action: 'COMPLETE' | 'CANCEL' | 'REFUND_KEEP_FEE' | 'REFUND_WITH_PENALTY' | 'REFUND_FULL';
+        action: 'COMPLETE' | 'CANCEL' | 'CANCEL_FULL' | 'REFUND';
         penalty_amount?: number;
     }) {
         const { task_id, poster_id, action, penalty_amount } = data;
@@ -125,16 +159,58 @@ export class PaymentService {
         const transaction = await sequelize.transaction();
         try {
             // Find Payment associated with Task
-            const payment = await Payment.findOne({
-                where: { related_task_id: task_id, status: 'PENDING' },
-                transaction
-            });
+            // For COMPLETE: Must be PENDING
+            // For REFUND actions: Can be PENDING or COMPLETED (but not already REFUNDED)
+            let payment;
 
-            if (!payment) {
-                // If not found in PENDING, maybe checks status?
-                // For this strict flow, we expect it to be pending.
-                throw new AppError('No pending payment found for this task.', 404);
+            if (action === 'COMPLETE') {
+                payment = await Payment.findOne({
+                    where: { related_task_id: task_id, status: 'PENDING' },
+                    transaction
+                });
+
+                if (!payment) {
+                    throw new AppError('No pending payment found for this task.', 404);
+                }
+            } else {
+                // CANCEL, REFUND_FULL, REFUND_KEEP_FEE, REFUND_WITH_PENALTY
+                // Can work on PENDING or COMPLETED payments
+                const { Op } = require('sequelize');
+                payment = await Payment.findOne({
+                    where: {
+                        related_task_id: task_id,
+                        status: { [Op.in]: ['PENDING', 'COMPLETED'] }
+                    },
+                    order: [['createdAt', 'DESC']], // Get latest if multiple
+                    transaction
+                });
+
+                if (!payment) {
+                    // Check if already refunded
+                    const refundedPayment = await Payment.findOne({
+                        where: {
+                            related_task_id: task_id,
+                            status: { [Op.in]: ['REFUNDED', 'REFUNDED_FULL', 'REFUNDED_KEEP_FEE', 'REFUNDED_WITH_PENALTY'] }
+                        },
+                        transaction
+                    });
+
+                    if (refundedPayment) {
+                        throw new AppError('Payment for this task has already been refunded.', 400);
+                    }
+
+                    throw new AppError('No payment found for this task.', 404);
+                }
             }
+
+            logger.info('Task Action: Payment found', {
+                task_id,
+                action,
+                payment_id: payment.id,
+                payment_status: payment.status,
+                amount: payment.amount,
+                has_stripe_pi: !!payment.stripe_payment_intent_id
+            });
 
             // Security check
             // if (payment.user_id !== poster_id) throw new AppError('Poster ID mismatch', 403);
@@ -293,89 +369,219 @@ The payout will be automatically triggered when the user updates their payment d
                 await transaction.commit();
                 return { success: true, status: responseStatus, message: responseMessage };
 
-            } else if (action === 'CANCEL' || action === 'REFUND_FULL') {
-                // Scenario 3: Normal Refund (Reverse everything)
-                // "Refund the full amount to the Poster. No service fee kept. No tasker penalty. Reverse all."
+            } else if (action === 'CANCEL') {
+                // CANCEL: Partial refund (keep service fee), tasker not affected
+                // Refund = payment.amount - service_fee
+                // Service fee is NOT refunded (company keeps it)
+                // Tasker balance is NOT affected
 
-                // 1. Stripe Refund (Full)
+                const refundAmount = Number(payment.amount) - Number(payment.service_fee);
+                const feePart = Number(payment.service_fee);
+
+                logger.info('CANCEL: Processing', {
+                    task_id,
+                    payment_id: payment.id,
+                    payment_status: payment.status,
+                    total_amount: payment.amount,
+                    refund_amount: refundAmount,
+                    fee_kept: feePart
+                });
+
+                // 1. Stripe Refund (Partial - exclude service fee)
                 if (payment.stripe_payment_intent_id) {
-                    await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                    try {
+                        await import('./StripeService').then(m => m.stripeService.createRefund(refundAmount, payment.stripe_payment_intent_id!));
+                        logger.info('CANCEL: Stripe refund issued', {
+                            task_id,
+                            amount: refundAmount,
+                            stripe_pi: payment.stripe_payment_intent_id
+                        });
+                    } catch (stripeErr: any) {
+                        logger.error('CANCEL: Stripe refund failed', {
+                            task_id,
+                            error: stripeErr.message
+                        });
+                        // Record failed refund for admin retry
+                        await recordFailedRefund({
+                            payment,
+                            task_id,
+                            user_id: poster_id,
+                            amount: refundAmount,
+                            action: 'CANCEL',
+                            error: stripeErr
+                        });
+                        throw new AppError(`Stripe refund failed: ${stripeErr.message}`, 502);
+                    }
+                } else {
+                    logger.warn('CANCEL: No Stripe Payment Intent - internal refund only', { task_id });
                 }
 
-                // 2. Reverse Pending
-                await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
-                await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
+                // 2. Reverse balances based on payment state
+                // Tasker balance NOT affected
+                if (payment.status === 'PENDING') {
+                    // Release tasker pending
+                    await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
+                    // Company: Move from pending to balance (keeps fee)
+                    await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
+                    await companyAccount.increment('balance', { by: feePart, transaction });
+                    await companyAccount.increment('total_revenue', { by: feePart, transaction });
+                } else if (payment.status === 'COMPLETED') {
+                    // Reverse tasker available balance
+                    await taskerWallet.decrement('available_balance', { by: taskerPendingAmount, transaction });
+                    // Company: Deduct commission only (keeps fee)
+                    const commissionPart = Number(payment.commission);
+                    await companyAccount.decrement('balance', { by: commissionPart, transaction });
+                    await companyAccount.decrement('total_revenue', { by: commissionPart, transaction });
+                }
 
-                // 3. Statuses
+                // 3. Update Statuses
                 await import('../models/Transaction').then(m => m.Transaction.update(
-                    { status: 'CANCELLED' }, // or REFUNDED
+                    { status: 'CANCELLED' },
                     { where: { reference_id: payment.id }, transaction }
                 ));
                 payment.status = 'REFUNDED';
                 await payment.save({ transaction });
 
                 await transaction.commit();
-                return { success: true, status: 'REFUNDED_FULL' };
 
-            } else if (action === 'REFUND_KEEP_FEE') {
-                // Scenario 1: Keep Service Fee
-                // Refund Task Price ONLY.
+                logger.info('CANCEL: Complete', { task_id, payment_id: payment.id, refund_amount: refundAmount });
+                return { success: true, status: 'CANCELLED', refund_amount: refundAmount, fee_kept: feePart };
 
-                const taskPrice = Number(payment.amount) - Number(payment.service_fee); // Total - Fee
+            } else if (action === 'CANCEL_FULL') {
+                // CANCEL_FULL: Full refund to poster + tasker penalty
+                // Refund = payment.amount (full amount)
+                // Tasker = deduct commission as negative balance
+                // Company = gets commission as income
 
-                // 1. Stripe Refund (Partial)
-                if (payment.stripe_payment_intent_id) {
-                    await import('./StripeService').then(m => m.stripeService.createRefund(taskPrice, payment.stripe_payment_intent_id!));
-                }
+                const penalty = Number(payment.commission);
 
-                // 2. Reverse Tasker Pending (They get nothing)
-                await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
-
-                // 3. Company Pending Logic
-                // "Keep the service fee as company income."
-                // Company Pending was (Commission + Fee).
-                // We keep Fee. We lose Commission.
-                const commissionPart = Number(payment.commission);
-                const feePart = Number(payment.service_fee);
-
-                await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
-                await companyAccount.increment('balance', { by: feePart, transaction });
-                await companyAccount.increment('total_revenue', { by: feePart, transaction });
-
-                // 4. Statuses
-                payment.status = 'REFUNDED';
-                await payment.save({ transaction });
-
-                await transaction.commit();
-                return { success: true, status: 'REFUNDED_KEEP_FEE' };
-
-            } else if (action === 'REFUND_WITH_PENALTY') {
-                // Scenario 2: Full Refund Poster + Tasker Penalty
-                // "Refund 100% ... Apply commission amount as negative balance to Tasker."
+                logger.info('CANCEL_FULL: Processing', {
+                    task_id,
+                    payment_id: payment.id,
+                    payment_status: payment.status,
+                    refund_amount: payment.amount,
+                    penalty_amount: penalty
+                });
 
                 // 1. Stripe Refund (Full)
                 if (payment.stripe_payment_intent_id) {
-                    await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                    try {
+                        await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                        logger.info('CANCEL_FULL: Stripe refund issued', {
+                            task_id,
+                            amount: payment.amount,
+                            stripe_pi: payment.stripe_payment_intent_id
+                        });
+                    } catch (stripeErr: any) {
+                        logger.error('CANCEL_FULL: Stripe refund failed', {
+                            task_id,
+                            error: stripeErr.message
+                        });
+                        await recordFailedRefund({
+                            payment,
+                            task_id,
+                            user_id: poster_id,
+                            amount: Number(payment.amount),
+                            action: 'CANCEL_FULL',
+                            error: stripeErr
+                        });
+                        throw new AppError(`Stripe refund failed: ${stripeErr.message}`, 502);
+                    }
+                } else {
+                    logger.warn('CANCEL_FULL: No Stripe Payment Intent - internal refund only', { task_id });
                 }
 
-                // 2. Reverse Pending
-                await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
-                await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
+                // 2. Reverse balances based on payment state
+                if (payment.status === 'PENDING') {
+                    await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
+                    await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
+                } else if (payment.status === 'COMPLETED') {
+                    await taskerWallet.decrement('available_balance', { by: taskerPendingAmount, transaction });
+                    await companyAccount.decrement('balance', { by: companyPendingAmount, transaction });
+                    await companyAccount.decrement('total_revenue', { by: companyPendingAmount, transaction });
+                }
 
-                // 3. Apply Penalty to Tasker
-                const penalty = Number(payment.commission);
-                await taskerWallet.decrement('available_balance', { by: penalty, transaction }); // Goes negative
+                // 3. Apply Penalty to Tasker (goes negative if needed)
+                await taskerWallet.decrement('available_balance', { by: penalty, transaction });
 
                 // 4. Credit Company (Penalty Income)
                 await companyAccount.increment('balance', { by: penalty, transaction });
                 await companyAccount.increment('total_revenue', { by: penalty, transaction });
 
-                // 5. Statuses
+                // 5. Update Statuses
+                await import('../models/Transaction').then(m => m.Transaction.update(
+                    { status: 'CANCELLED' },
+                    { where: { reference_id: payment.id }, transaction }
+                ));
                 payment.status = 'REFUNDED';
                 await payment.save({ transaction });
 
                 await transaction.commit();
-                return { success: true, status: 'REFUNDED_WITH_PENALTY' };
+                logger.info('CANCEL_FULL: Complete', { task_id, penalty });
+                return { success: true, status: 'CANCELLED_FULL', refund_amount: Number(payment.amount), penalty };
+
+            } else if (action === 'REFUND') {
+                // REFUND: Full Stripe refund only
+                // Refund = payment.amount (full amount)
+                // Tasker = no change
+                // Company = no income
+
+                logger.info('REFUND: Processing', {
+                    task_id,
+                    payment_id: payment.id,
+                    payment_status: payment.status,
+                    refund_amount: payment.amount
+                });
+
+                // 1. Stripe Refund (Full) - REQUIRED
+                if (!payment.stripe_payment_intent_id) {
+                    throw new AppError('No Stripe Payment Intent found. Cannot process refund.', 400);
+                }
+
+                try {
+                    await import('./StripeService').then(m => m.stripeService.createRefund(Number(payment.amount), payment.stripe_payment_intent_id!));
+                    logger.info('REFUND: Stripe refund issued', {
+                        task_id,
+                        amount: payment.amount,
+                        stripe_pi: payment.stripe_payment_intent_id
+                    });
+                } catch (stripeErr: any) {
+                    logger.error('REFUND: Stripe refund failed', {
+                        task_id,
+                        error: stripeErr.message
+                    });
+                    await recordFailedRefund({
+                        payment,
+                        task_id,
+                        user_id: poster_id,
+                        amount: Number(payment.amount),
+                        action: 'REFUND',
+                        error: stripeErr
+                    });
+                    throw new AppError(`Stripe refund failed: ${stripeErr.message}`, 502);
+                }
+
+                // 2. Reverse balances based on payment state
+                if (payment.status === 'PENDING') {
+                    await taskerWallet.decrement('pending_balance', { by: taskerPendingAmount, transaction });
+                    await companyAccount.decrement('pending_balance', { by: companyPendingAmount, transaction });
+                } else if (payment.status === 'COMPLETED') {
+                    await taskerWallet.decrement('available_balance', { by: taskerPendingAmount, transaction });
+                    await companyAccount.decrement('balance', { by: companyPendingAmount, transaction });
+                    await companyAccount.decrement('total_revenue', { by: companyPendingAmount, transaction });
+                }
+
+                // 3. Update Statuses
+                await import('../models/Transaction').then(m => m.Transaction.update(
+                    { status: 'REFUNDED' },
+                    { where: { reference_id: payment.id }, transaction }
+                ));
+                payment.status = 'REFUNDED';
+                await payment.save({ transaction });
+
+                await transaction.commit();
+                logger.info('REFUND: Complete', { task_id, payment_id: payment.id });
+                return { success: true, status: 'REFUNDED', refund_amount: Number(payment.amount) };
 
             } else {
                 throw new AppError('Invalid action.', 400);

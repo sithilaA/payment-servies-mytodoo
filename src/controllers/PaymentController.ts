@@ -9,7 +9,7 @@ export class PaymentController {
      * Endpoint 1: Create Task Payment (Pending Balance)
      */
     static createTaskPayment = serviceHandler(async (req: Request, res: Response) => {
-        const { task_price, commission, service_fee, tasker_id, poster_id, task_id } = req.body;
+        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent } = req.body;
 
         // Basic validation
         if (!task_price || !tasker_id || !poster_id || !task_id) {
@@ -24,7 +24,8 @@ export class PaymentController {
                 service_fee: service_fee || 0,
                 tasker_id,
                 poster_id,
-                task_id
+                task_id,
+                payment_intent
             });
             res.json(result);
         } catch (e: any) {

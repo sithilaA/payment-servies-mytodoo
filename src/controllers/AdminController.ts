@@ -172,4 +172,118 @@ export class AdminController {
             });
         }
     });
+
+    /**
+     * Get Failed Refund Requests for Admin Review
+     */
+    static getFailedRefunds = serviceHandler(async (req: Request, res: Response) => {
+        const { FailedRefundRequest } = require('../models/FailedRefundRequest');
+        const { status } = req.query;
+
+        const whereClause: any = {};
+        if (status) {
+            whereClause.status = status;
+        }
+
+        const refunds = await FailedRefundRequest.findAll({
+            where: whereClause,
+            order: [['createdAt', 'DESC']]
+        });
+
+        res.json({ success: true, count: refunds.length, refunds });
+    });
+
+    /**
+     * Retry a Failed Refund
+     */
+    static retryFailedRefund = serviceHandler(async (req: Request, res: Response) => {
+        const { id } = req.params;
+        const { FailedRefundRequest } = require('../models/FailedRefundRequest');
+        const { stripeService } = require('../services/StripeService');
+        const { Payment } = require('../models/Payment');
+        const { logger } = require('../utils/logger');
+
+        const refundRequest = await FailedRefundRequest.findByPk(id);
+        if (!refundRequest) throw new AppError("Refund request not found", 404);
+
+        if (refundRequest.status === 'SUCCESS') {
+            throw new AppError("This refund has already been processed successfully", 400);
+        }
+
+        // Mark as retrying
+        refundRequest.status = 'RETRYING';
+        refundRequest.retry_count = (refundRequest.retry_count || 0) + 1;
+        refundRequest.last_retry_at = new Date();
+        await refundRequest.save();
+
+        logger.info('Admin Retry Refund: Initiating', {
+            request_id: id,
+            task_id: refundRequest.task_id,
+            amount: refundRequest.amount,
+            action: refundRequest.action,
+            stripe_pi: refundRequest.stripe_payment_intent_id,
+            retry_count: refundRequest.retry_count
+        });
+
+        try {
+            if (!refundRequest.stripe_payment_intent_id) {
+                throw new AppError("No Stripe Payment Intent - cannot retry", 400);
+            }
+
+            // Attempt Stripe Refund
+            const refund = await stripeService.createRefund(
+                Number(refundRequest.amount),
+                refundRequest.stripe_payment_intent_id
+            );
+
+            // Update request status
+            refundRequest.status = 'SUCCESS';
+            await refundRequest.save();
+
+            // Update payment status if needed
+            const payment = await Payment.findByPk(refundRequest.payment_id);
+            if (payment && payment.status !== 'REFUNDED') {
+                payment.status = 'REFUNDED';
+                await payment.save();
+            }
+
+            logger.info('Admin Retry Refund: Success', {
+                request_id: id,
+                task_id: refundRequest.task_id,
+                refund_id: refund.id,
+                amount: refundRequest.amount
+            });
+
+            res.json({
+                success: true,
+                message: "Refund successfully processed",
+                refund_id: refund.id,
+                amount: refundRequest.amount
+            });
+
+        } catch (error: any) {
+            const errorCode = error.raw?.code || error.code || 'UNKNOWN_RETRY_ERROR';
+            const errorMessage = error.message || 'Unknown error';
+
+            logger.error('Admin Retry Refund: Failed', {
+                request_id: id,
+                task_id: refundRequest.task_id,
+                error_code: errorCode,
+                error_message: errorMessage,
+                retry_count: refundRequest.retry_count
+            });
+
+            refundRequest.status = 'FAILED';
+            refundRequest.error_code = errorCode;
+            refundRequest.error_message = errorMessage;
+            await refundRequest.save();
+
+            res.status(400).json({
+                success: false,
+                message: "Refund retry failed",
+                error_code: errorCode,
+                error: errorMessage
+            });
+        }
+    });
 }
