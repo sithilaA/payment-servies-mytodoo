@@ -1,7 +1,11 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import path from 'path';
+import dotenv from 'dotenv';
 import { requestIdStore } from '../middlewares/requestId';
+import { HttpLogTransport } from './httpLogTransport';
+
+dotenv.config();
 
 // ─── Log Directory ──────────────────────────────────────────────────
 const LOG_DIR = path.resolve(process.cwd(), 'logs');
@@ -78,19 +82,42 @@ const httpTransport = new DailyRotateFile({
   ),
 });
 
+// ─── Build Transports Array ─────────────────────────────────────────
+const transports: winston.transport[] = [
+  combinedTransport,
+  errorTransport,
+  httpTransport,
+  new winston.transports.Console({ format: consoleFormat }),
+];
+
+// ─── Transport: External HTTP API (optional) ────────────────────────
+if (process.env.LOG_API_URL) {
+  transports.push(
+    new HttpLogTransport({
+      url: process.env.LOG_API_URL,
+      apiKey: process.env.LOG_API_KEY,
+      batchSize: parseInt(process.env.LOG_API_BATCH_SIZE || '50', 10),
+      flushInterval: parseInt(process.env.LOG_API_FLUSH_MS || '5000', 10),
+      level: process.env.LOG_LEVEL || 'debug',
+    })
+  );
+}
+
 // ─── Create Winston Logger ──────────────────────────────────────────
 const winstonLogger = winston.createLogger({
   levels,
   level: process.env.LOG_LEVEL || 'debug',
   format: baseFormat,
-  transports: [
-    combinedTransport,
-    errorTransport,
-    httpTransport,
-    new winston.transports.Console({ format: consoleFormat }),
-  ],
+  transports,
   exitOnError: false,
 });
+
+// Log startup info about external transport
+if (process.env.LOG_API_URL) {
+  winstonLogger.info('External log forwarding enabled', { url: process.env.LOG_API_URL });
+} else {
+  winstonLogger.debug('External log forwarding disabled (LOG_API_URL not set)');
+}
 
 // ─── Logger Wrapper (preserves existing API) ────────────────────────
 class Logger {
