@@ -69,4 +69,18 @@ export class Payment extends Model {
     allowNull: true
   })
   receipt_url?: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+    validate: { isEmail: true }
+  })
+  poster_email?: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+    validate: { isEmail: true }
+  })
+  tasker_email?: string;
 }

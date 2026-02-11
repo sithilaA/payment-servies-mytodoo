@@ -9,11 +9,20 @@ export class PaymentController {
      * Endpoint 1: Create Task Payment (Pending Balance)
      */
     static createTaskPayment = serviceHandler(async (req: Request, res: Response) => {
-        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent } = req.body;
+        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent, posterEmail, taskerEmail } = req.body;
 
         // Basic validation
         if (!task_price || !tasker_id || !poster_id || !task_id) {
             throw new AppError("Missing required fields", 400);
+        }
+
+        // Email format validation (optional fields)
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (posterEmail && !emailRegex.test(posterEmail)) {
+            throw new AppError("Invalid posterEmail format", 400);
+        }
+        if (taskerEmail && !emailRegex.test(taskerEmail)) {
+            throw new AppError("Invalid taskerEmail format", 400);
         }
 
         // Call Service
@@ -25,7 +34,9 @@ export class PaymentController {
                 tasker_id,
                 poster_id,
                 task_id,
-                payment_intent
+                payment_intent,
+                posterEmail,
+                taskerEmail
             });
             res.json(result);
         } catch (e: any) {

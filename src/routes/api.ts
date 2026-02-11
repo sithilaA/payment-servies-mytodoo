@@ -77,6 +77,16 @@ router.post('/users/payout-details', UserController.updatePayoutDetails);
  *                 type: string
  *                 description: Stripe Payment Intent ID (required for refunds)
  *                 example: "pi_3xyz"
+ *               posterEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Email address of the poster (optional)
+ *                 example: "poster@example.com"
+ *               taskerEmail:
+ *                 type: string
+ *                 format: email
+ *                 description: Email address of the tasker (optional)
+ *                 example: "tasker@example.com"
  *           example:
  *             task_id: "TSK-001"
  *             tasker_id: "USR-002"
@@ -85,6 +95,8 @@ router.post('/users/payout-details', UserController.updatePayoutDetails);
  *             service_fee: 10
  *             commission: 15
  *             payment_intent: "pi_3xyz"
+ *             posterEmail: "poster@example.com"
+ *             taskerEmail: "tasker@example.com"
  *     responses:
  *       200:
  *         description: Funds held successfully

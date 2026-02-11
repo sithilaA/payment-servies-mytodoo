@@ -55,8 +55,10 @@ export class PaymentService {
         poster_id: string; // External User ID
         task_id: string;
         payment_intent?: string; // Stripe Payment Intent ID (optional)
+        posterEmail?: string;
+        taskerEmail?: string;
     }) {
-        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent } = data;
+        const { task_price, commission, service_fee, tasker_id, poster_id, task_id, payment_intent, posterEmail, taskerEmail } = data;
 
         // Check for existing payment properly (Idempotency / Unique Constraint Logic)
         const existingPayment = await Payment.findOne({ where: { related_task_id: task_id } });
@@ -80,7 +82,9 @@ export class PaymentService {
                 currency: settings.currency,
                 status: 'PENDING',
                 related_task_id: task_id,
-                stripe_payment_intent_id: payment_intent || null
+                stripe_payment_intent_id: payment_intent || null,
+                poster_email: posterEmail || null,
+                tasker_email: taskerEmail || null
             }, { transaction });
 
             // 3. Update Tasker Pending Balance
