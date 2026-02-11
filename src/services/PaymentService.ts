@@ -151,14 +151,14 @@ export class PaymentService {
                     date: new Date().toISOString().split('T')[0],
                 };
                 if (posterEmail) {
-                    const { subject, body } = paymentSuccessPosterEmail(emailData);
-                    emailService.sendEmail(posterEmail, subject, body).catch(e =>
+                    const { subject, html, text } = paymentSuccessPosterEmail(emailData);
+                    emailService.sendHtmlEmail(posterEmail, subject, html, text).catch(e =>
                         logger.error('Notification email failed (poster, payment)', { error: (e as any).message })
                     );
                 }
                 if (taskerEmail) {
-                    const { subject, body } = paymentSuccessTaskerEmail(emailData);
-                    emailService.sendEmail(taskerEmail, subject, body).catch(e =>
+                    const { subject, html, text } = paymentSuccessTaskerEmail(emailData);
+                    emailService.sendHtmlEmail(taskerEmail, subject, html, text).catch(e =>
                         logger.error('Notification email failed (tasker, payment)', { error: (e as any).message })
                     );
                 }
@@ -404,13 +404,13 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: payout notification to tasker
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
-                    const { subject, body } = payoutPaidEmail({
+                    const { subject, html, text } = payoutPaidEmail({
                         payoutId: payment.id,
                         amount: taskerPendingAmount.toFixed(2),
                         currency: settings.currency,
                         date: new Date().toISOString().split('T')[0],
                     });
-                    emailService.sendEmail(payment.tasker_email, subject, body).catch(e =>
+                    emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })
                     );
                 }
@@ -496,14 +496,14 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, body } = refundEmail({
+                    const { subject, html, text } = refundEmail({
                         taskId: task_id,
                         amount: refundAmount.toFixed(2),
                         currency: settings.currency,
                         paymentId: payment.id,
                         date: new Date().toISOString().split('T')[0],
                     });
-                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                    emailService.sendHtmlEmail(payment.poster_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (poster, cancel refund)', { error: (e as any).message })
                     );
                 }
@@ -584,14 +584,14 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, body } = refundEmail({
+                    const { subject, html, text } = refundEmail({
                         taskId: task_id,
                         amount: Number(payment.amount).toFixed(2),
                         currency: settings.currency,
                         paymentId: payment.id,
                         date: new Date().toISOString().split('T')[0],
                     });
-                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                    emailService.sendHtmlEmail(payment.poster_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (poster, cancel_full refund)', { error: (e as any).message })
                     );
                 }
@@ -662,14 +662,14 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, body } = refundEmail({
+                    const { subject, html, text } = refundEmail({
                         taskId: task_id,
                         amount: Number(payment.amount).toFixed(2),
                         currency: settings.currency,
                         paymentId: payment.id,
                         date: new Date().toISOString().split('T')[0],
                     });
-                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                    emailService.sendHtmlEmail(payment.poster_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (poster, refund)', { error: (e as any).message })
                     );
                 }

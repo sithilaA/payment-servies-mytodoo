@@ -96,6 +96,57 @@ export class EmailService {
       }
     }
   }
+
+  async sendHtmlEmail(to: string | string[], subject: string, html: string, text?: string) {
+    const debug = process.env.EMAIL_DEBUG === 'true';
+
+    if (!to || (Array.isArray(to) && to.length === 0)) {
+      if (debug) logger.warn('EmailService: No recipients provided.');
+      return;
+    }
+
+    if (debug) {
+      logger.info('EMAIL_DEBUG: Attempting HTML Send', {
+        recipients: Array.isArray(to) ? to.join(',') : to,
+        subject,
+        smtpHost: `${process.env.SMTP_HOST}:${process.env.SMTP_PORT}`,
+        smtpUser: process.env.SMTP_USER
+      });
+    }
+
+    try {
+      const info = await this.transporter.sendMail({
+        from: process.env.SMTP_FROM || 'noreply@payment-service.com',
+        to,
+        subject,
+        text: text || subject,
+        html
+      });
+
+      logger.info('HTML email sent', {
+        recipients: to,
+        messageId: info.messageId
+      });
+
+      if (debug) {
+        logger.info('EMAIL_DEBUG: HTML Send Success', {
+          response: info.response,
+          messageId: info.messageId,
+          envelope: info.envelope
+        });
+      }
+
+    } catch (error: any) {
+      logger.error('Failed to send HTML email', { error: error.message });
+
+      if (debug) {
+        logger.error('EMAIL_DEBUG: HTML Send Failure', {
+          fullError: error,
+          stack: error.stack
+        });
+      }
+    }
+  }
 }
 
 export const emailService = new EmailService();
