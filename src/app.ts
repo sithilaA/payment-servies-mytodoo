@@ -7,6 +7,7 @@ import { dbConnect } from './config/database';
 import apiRoutes from './routes/api';
 import { requestIdMiddleware } from './middlewares/requestId';
 import { requestLogger } from './middlewares/requestLogger';
+import { logger } from './utils/logger';
 
 dotenv.config();
 
@@ -31,7 +32,7 @@ import { swaggerSpec } from './config/swagger';
 
 if (process.env.SWAGGER_ENABLED === 'true') {
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  console.log('Swagger Docs available at /api-docs');
+  logger.info('Swagger Docs available at /api-docs');
 }
 
 // Health Check

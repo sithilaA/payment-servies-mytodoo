@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { escrowService } from '../services/EscrowService';
 import { payoutService } from '../services/PayoutService';
 import { serviceHandler } from '../utils';
+import { logger } from '../utils/logger';
 
 export class EscrowController {
 
@@ -23,19 +24,19 @@ export class EscrowController {
     static release = serviceHandler(async (req: Request, res: Response) => {
         const { id } = req.params;
         const escrow = await escrowService.releaseEscrow(id as string);
-        
+
         // Auto-Trigger Payout
         try {
             const netAmount = Number(escrow.amount) - (Number(escrow.commission) || 0);
             if (netAmount > 0) {
-                 await payoutService.requestPayout({
-                     externalUserId: escrow.payee_external_id,
-                     amount: netAmount,
-                     method: 'BANK'
-                 });
+                await payoutService.requestPayout({
+                    externalUserId: escrow.payee_external_id,
+                    amount: netAmount,
+                    method: 'BANK'
+                });
             }
         } catch (payoutError) {
-            console.error("Auto-payout failed after escrow release:", payoutError);
+            logger.error("Auto-payout failed after escrow release", { error: (payoutError as any)?.message });
             // We do not fail the request because Escrow IS released. Payout can be retried.
         }
 

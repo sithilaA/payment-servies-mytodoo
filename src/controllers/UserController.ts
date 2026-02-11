@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { walletService } from '../services/WalletService';
 import { serviceHandler } from '../utils';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 export class UserController {
   /**
@@ -173,7 +174,7 @@ export class UserController {
 
     } catch (e) {
       // Do not block the User Update response
-      console.error('Error processing pending payouts hook', e);
+      logger.error('Error processing pending payouts hook', { error: (e as any)?.message });
     }
 
     res.json({ success: true, message: "Payout details updated and pending payouts triggered." });

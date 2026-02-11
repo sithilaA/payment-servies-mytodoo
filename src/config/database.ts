@@ -1,5 +1,6 @@
 import { Sequelize } from 'sequelize-typescript';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 import { Wallet } from '../models/Wallet';
 import { Transaction } from '../models/Transaction';
 import { Earning } from '../models/Earning';
@@ -38,19 +39,19 @@ export const dbConnect = async (retries = 5, delay = 5000) => {
   for (let i = 0; i < retries; i++) {
     try {
       await sequelize.authenticate();
-      console.log('Database connection has been established successfully.');
+      logger.info('Database connection has been established successfully.');
       // Sync models only on successful connection
       // NOTE: alter:true disabled due to MySQL 64 key limit error
       // Run this SQL manually: ALTER TABLE transactions MODIFY COLUMN status ENUM('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED') NOT NULL DEFAULT 'PENDING';
       await sequelize.sync({ alter: false });
       return;
     } catch (error: any) {
-      console.error(`Unable to connect to the database (Attempt ${i + 1}/${retries}):`, error.message);
+      logger.error(`Unable to connect to the database (Attempt ${i + 1}/${retries})`, { error: error.message });
       if (i < retries - 1) {
-        console.log(`Retrying in ${delay / 1000} seconds...`);
+        logger.info(`Retrying database connection in ${delay / 1000} seconds...`);
         await new Promise(res => setTimeout(res, delay));
       } else {
-        console.error('Max retries reached. Database connection failed. Application will start but DB features will be unavailable.');
+        logger.error('Max retries reached. Database connection failed. Application will start but DB features will be unavailable.');
 
         // ALERT LOGIC
         const emailAlertsEnabled = process.env.EMAIL_ALERTS_ENABLED !== 'false';
@@ -92,14 +93,14 @@ export const dbConnect = async (retries = 5, delay = 5000) => {
                         `;
 
                 // Send Alert (Fire & Forget)
-                emailService.sendEmail(recipients, subject, body).catch((err: any) => console.error("Email send trigger failed", err));
+                emailService.sendEmail(recipients, subject, body).catch((err: any) => logger.error('Email send trigger failed', { error: err.message }));
               }
             }
           } catch (alertError) {
-            console.error('Failed to process alert configuration:', alertError);
+            logger.error('Failed to process alert configuration', { error: (alertError as any)?.message || alertError });
           }
         } else {
-          console.log('Database failure alert email skipped (EMAIL_ALERTS_ENABLED is false)');
+          logger.info('Database failure alert email skipped (EMAIL_ALERTS_ENABLED is false)');
         }
 
         // Do NOT exit process.

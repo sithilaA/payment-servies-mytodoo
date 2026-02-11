@@ -21,7 +21,7 @@ export class EmailService {
 
   async sendEmailWithAttachment(to: string, subject: string, text: string, attachment: { filename: string, content: Buffer }) {
     if (!to) {
-      console.warn('No recipient email provided, skipping email.');
+      logger.warn('No recipient email provided, skipping email.');
       return;
     }
 
@@ -38,9 +38,9 @@ export class EmailService {
           }
         ]
       });
-      console.log(`Email sent to ${to}`);
+      logger.info(`Email with attachment sent to ${to}`);
     } catch (error) {
-      console.error('Failed to send email:', error);
+      logger.error('Failed to send email with attachment', { error: (error as any)?.message || error });
       // We don't throw here to avoid failing the transaction/process just because email failed
     }
   }

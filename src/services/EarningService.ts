@@ -3,6 +3,7 @@ import { Earning } from '../models/Earning';
 import { walletService } from './WalletService';
 import { ledgerService } from './LedgerService';
 import { violationAlertService, ViolationType } from './ViolationAlertService';
+import { logger } from '../utils/logger';
 
 export class EarningService {
   async recordEarning(data: {
@@ -17,16 +18,16 @@ export class EarningService {
 
     // 1. Validation Logic
     const calculatedNet = task_price - service_fee - commission_fee;
-    
+
     // Safety check (floating point handling might need epsilon, but assuming simplified for now)
     if (calculatedNet < 0) {
-        throw new Error("Net earning cannot be negative");
+      throw new Error("Net earning cannot be negative");
     }
 
     // Logic: net = price - fees. Verification.
     // If the main backend sends 'net_earning' explicit, we should compare. 
     // Here we compute it to be safe.
-    
+
     // 2. Transaction
     const t = await sequelize.transaction();
 
@@ -67,7 +68,7 @@ export class EarningService {
     } catch (error: any) {
       await t.rollback();
       // Alert?
-      console.error("Earning record failed", error);
+      logger.error("Earning record failed", { error: error.message, stack: error.stack });
       throw error;
     }
   }

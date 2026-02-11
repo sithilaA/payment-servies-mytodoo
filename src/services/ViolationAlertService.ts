@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger';
 
 dotenv.config();
 
@@ -39,14 +40,14 @@ class ViolationAlertService {
     try {
       this.alertEmails = JSON.parse(process.env.ALERT_EMAILS || '[]');
     } catch (e) {
-      console.error('Failed to parse ALERT_EMAILS', e);
+      logger.error('Failed to parse ALERT_EMAILS', { error: (e as any)?.message || e });
       this.alertEmails = [];
     }
   }
 
   public async sendAlert(type: ViolationType, details: AlertDetails) {
     if (this.alertEmails.length === 0) {
-      console.warn('No alert emails configured, skipping alert:', type);
+      logger.warn('No alert emails configured, skipping alert', { type });
       return;
     }
 
@@ -72,7 +73,7 @@ class ViolationAlertService {
       subject,
       text,
     }).catch(err => {
-      console.error('Failed to send violation alert email:', err);
+      logger.error('Failed to send violation alert email', { error: err.message });
     });
   }
 }

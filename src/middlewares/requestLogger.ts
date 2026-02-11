@@ -3,9 +3,9 @@ import { logger } from '../utils/logger';
 
 export const requestLogger = (req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
-  
+
   // Log request start
-  logger.info(`Incoming ${req.method} ${req.url}`, {
+  logger.http(`Incoming ${req.method} ${req.url}`, {
     method: req.method,
     url: req.url,
     ip: req.ip,
@@ -16,7 +16,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
   // Hook into response finish
   res.on('finish', () => {
     const duration = Date.now() - start;
-    logger.info(`Completed ${req.method} ${req.url}`, {
+    logger.http(`Completed ${req.method} ${req.url}`, {
       status: res.statusCode,
       duration: `${duration}ms`,
       method: req.method,
