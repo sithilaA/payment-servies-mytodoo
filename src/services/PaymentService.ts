@@ -8,6 +8,13 @@ import { sequelize } from '../config/database';
 import { logger } from '../utils/logger';
 import { settings } from '../config/settings';
 import { AppError } from '../utils/AppError';
+import { emailService } from './EmailService';
+import {
+    paymentSuccessPosterEmail,
+    paymentSuccessTaskerEmail,
+    payoutPaidEmail,
+    refundEmail,
+} from '../utils/notificationEmails';
 
 // Helper to record failed refund requests
 async function recordFailedRefund(data: {
@@ -133,6 +140,29 @@ export class PaymentService {
                 taskerId: tasker_id,
                 totalAmount
             });
+
+            // Fire-and-forget email notifications
+            if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false') {
+                const emailData = {
+                    taskId: task_id,
+                    amount: totalAmount.toFixed(2),
+                    currency: settings.currency,
+                    paymentId: payment.id,
+                    date: new Date().toISOString().split('T')[0],
+                };
+                if (posterEmail) {
+                    const { subject, body } = paymentSuccessPosterEmail(emailData);
+                    emailService.sendEmail(posterEmail, subject, body).catch(e =>
+                        logger.error('Notification email failed (poster, payment)', { error: (e as any).message })
+                    );
+                }
+                if (taskerEmail) {
+                    const { subject, body } = paymentSuccessTaskerEmail(emailData);
+                    emailService.sendEmail(taskerEmail, subject, body).catch(e =>
+                        logger.error('Notification email failed (tasker, payment)', { error: (e as any).message })
+                    );
+                }
+            }
 
             return {
                 message: "Payment created, funds held.",
@@ -371,6 +401,20 @@ The payout will be automatically triggered when the user updates their payment d
                 await payment.save({ transaction });
 
                 await transaction.commit();
+
+                // Fire-and-forget: payout notification to tasker
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
+                    const { subject, body } = payoutPaidEmail({
+                        payoutId: payment.id,
+                        amount: taskerPendingAmount.toFixed(2),
+                        currency: settings.currency,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendEmail(payment.tasker_email, subject, body).catch(e =>
+                        logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })
+                    );
+                }
+
                 return { success: true, status: responseStatus, message: responseMessage };
 
             } else if (action === 'CANCEL') {
@@ -449,6 +493,21 @@ The payout will be automatically triggered when the user updates their payment d
                 await transaction.commit();
 
                 logger.info('CANCEL: Complete', { task_id, payment_id: payment.id, refund_amount: refundAmount });
+
+                // Fire-and-forget: refund notification to poster
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
+                    const { subject, body } = refundEmail({
+                        taskId: task_id,
+                        amount: refundAmount.toFixed(2),
+                        currency: settings.currency,
+                        paymentId: payment.id,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                        logger.error('Notification email failed (poster, cancel refund)', { error: (e as any).message })
+                    );
+                }
+
                 return { success: true, status: 'CANCELLED', refund_amount: refundAmount, fee_kept: feePart };
 
             } else if (action === 'CANCEL_FULL') {
@@ -522,6 +581,21 @@ The payout will be automatically triggered when the user updates their payment d
 
                 await transaction.commit();
                 logger.info('CANCEL_FULL: Complete', { task_id, penalty });
+
+                // Fire-and-forget: refund notification to poster
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
+                    const { subject, body } = refundEmail({
+                        taskId: task_id,
+                        amount: Number(payment.amount).toFixed(2),
+                        currency: settings.currency,
+                        paymentId: payment.id,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                        logger.error('Notification email failed (poster, cancel_full refund)', { error: (e as any).message })
+                    );
+                }
+
                 return { success: true, status: 'CANCELLED_FULL', refund_amount: Number(payment.amount), penalty };
 
             } else if (action === 'REFUND') {
@@ -585,6 +659,21 @@ The payout will be automatically triggered when the user updates their payment d
 
                 await transaction.commit();
                 logger.info('REFUND: Complete', { task_id, payment_id: payment.id });
+
+                // Fire-and-forget: refund notification to poster
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
+                    const { subject, body } = refundEmail({
+                        taskId: task_id,
+                        amount: Number(payment.amount).toFixed(2),
+                        currency: settings.currency,
+                        paymentId: payment.id,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendEmail(payment.poster_email, subject, body).catch(e =>
+                        logger.error('Notification email failed (poster, refund)', { error: (e as any).message })
+                    );
+                }
+
                 return { success: true, status: 'REFUNDED', refund_amount: Number(payment.amount) };
 
             } else {
