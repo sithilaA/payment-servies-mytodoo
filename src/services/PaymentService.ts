@@ -372,19 +372,6 @@ The payout will be automatically triggered when the user updates their payment d
                             }, { transaction }));
 
                             logger.info('Stripe Payout Triggered & Saved', { task_id, amount: payoutAmount, stripe_acc: taskerWallet.stripe_account_id });
-
-                            // Fire-and-forget: payout notification to tasker (only when payout actually succeeds)
-                            if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
-                                const { subject, html, text } = payoutPaidEmail({
-                                    payoutId: transfer.id,
-                                    amount: payoutAmount.toFixed(2),
-                                    currency: settings.currency,
-                                    date: new Date().toISOString().split('T')[0],
-                                });
-                                emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
-                                    logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })
-                                );
-                            }
                         }
                     } catch (stripeErr: any) {
                         logger.error('Stripe Payout Failed', { stripeErr });
@@ -415,6 +402,20 @@ The payout will be automatically triggered when the user updates their payment d
                 await payment.save({ transaction });
 
                 await transaction.commit();
+
+                // Fire-and-forget: payout funded notification to tasker
+                // Amount = task_price - commission (what the tasker actually earns from this task)
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
+                    const { subject, html, text } = payoutPaidEmail({
+                        payoutId: payment.id,
+                        amount: taskerPendingAmount.toFixed(2),
+                        currency: settings.currency,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
+                        logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })
+                    );
+                }
 
                 return { success: true, status: responseStatus, message: responseMessage };
 
