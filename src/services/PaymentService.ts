@@ -14,6 +14,7 @@ import {
     paymentSuccessTaskerEmail,
     payoutPaidEmail,
     refundEmail,
+    penaltyAppliedEmail,
 } from '../utils/notificationEmails';
 
 // Helper to record failed refund requests
@@ -593,6 +594,20 @@ The payout will be automatically triggered when the user updates their payment d
                     });
                     emailService.sendHtmlEmail(payment.poster_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (poster, cancel_full refund)', { error: (e as any).message })
+                    );
+                }
+
+                // Fire-and-forget: penalty notification to tasker
+                if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
+                    const { subject, html, text } = penaltyAppliedEmail({
+                        taskId: task_id,
+                        penaltyAmount: penalty.toFixed(2),
+                        currency: settings.currency,
+                        paymentId: payment.id,
+                        date: new Date().toISOString().split('T')[0],
+                    });
+                    emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
+                        logger.error('Notification email failed (tasker, cancel_full penalty)', { error: (e as any).message })
                     );
                 }
 
