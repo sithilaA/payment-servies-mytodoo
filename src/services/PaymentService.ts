@@ -422,8 +422,7 @@ The payout will be automatically triggered when the user updates their payment d
                         // Payout = task_price - commission.
                         taskPrice: (Number(payment.amount) - Number(payment.service_fee)).toFixed(2),
                         commission: Number(payment.commission).toFixed(2),
-                        serviceFee: Number(payment.service_fee).toFixed(2) // We display poster service fee as info, or 0 if "tasker service fee" is meant to be implicit.
-                        // Since user asked for "Tasker Service Fee", but only poster fee exists, we show what we have.
+                        // serviceFee removed as per user request
                     });
                     emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })

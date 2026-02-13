@@ -229,8 +229,6 @@ export function payoutPaidEmail(data: PayoutData) {
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Commission', `-${data.currency} ${data.commission}`)}
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
-      ${detailRow('Service Fee', `-${data.currency} ${data.serviceFee}`)}
-      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Total Payout', `<strong>${data.currency} ${data.amount}</strong>`)}
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Status', statusBadge('COMPLETED', '#0d7237', '#e6f4ed'))}
@@ -243,7 +241,7 @@ export function payoutPaidEmail(data: PayoutData) {
   return {
     subject: `Payout Processed — ${data.currency} ${data.amount}`,
     html: emailLayout('Payout Processed', content),
-    text: `Payout Processed\n\nYour payout of ${data.currency} ${data.amount} has been sent to your bank account.\n\nPayout Breakdown:\nTask Price: ${data.currency} ${data.taskPrice}\nCommission: -${data.currency} ${data.commission}\nService Fee: -${data.currency} ${data.serviceFee}\n\nPayout ID: ${data.payoutId}\nDate: ${data.date}\n\nPlease allow 1-3 business days for the funds to appear.\n\nThis is an automated notification.`
+    text: `Payout Processed\n\nYour payout of ${data.currency} ${data.amount} has been sent to your bank account.\n\nPayout Breakdown:\nTask Price: ${data.currency} ${data.taskPrice}\nCommission: -${data.currency} ${data.commission}\n\nPayout ID: ${data.payoutId}\nDate: ${data.date}\n\nPlease allow 1-3 business days for the funds to appear.\n\nThis is an automated notification.`
   };
 }
 
