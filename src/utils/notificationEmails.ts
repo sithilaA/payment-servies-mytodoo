@@ -18,6 +18,9 @@ interface PayoutData {
   currency: string;
   date: string;
   failureReason?: string;
+  taskPrice?: string;
+  commission?: string;
+  serviceFee?: string;
 }
 
 interface RefundData {
@@ -31,6 +34,15 @@ interface RefundData {
 interface PenaltyData {
   taskId: string;
   penaltyAmount: string;
+  currency: string;
+  paymentId: string;
+  date: string;
+}
+
+interface CancellationData {
+  taskId: string;
+  refundAmount: string;
+  penaltyDeducted: string;
   currency: string;
   paymentId: string;
   date: string;
@@ -213,6 +225,14 @@ export function payoutPaidEmail(data: PayoutData) {
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Date', data.date)}
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Task Price', `${data.currency} ${data.taskPrice}`)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Commission', `-${data.currency} ${data.commission}`)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Service Fee', `-${data.currency} ${data.serviceFee}`)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Total Payout', `<strong>${data.currency} ${data.amount}</strong>`)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Status', statusBadge('COMPLETED', '#0d7237', '#e6f4ed'))}
     </table>
 
@@ -223,7 +243,7 @@ export function payoutPaidEmail(data: PayoutData) {
   return {
     subject: `Payout Processed — ${data.currency} ${data.amount}`,
     html: emailLayout('Payout Processed', content),
-    text: `Payout Processed\n\nYour payout of ${data.currency} ${data.amount} has been sent to your bank account.\n\nPayout ID: ${data.payoutId}\nDate: ${data.date}\n\nPlease allow 1-3 business days for the funds to appear.\n\nThis is an automated notification.`
+    text: `Payout Processed\n\nYour payout of ${data.currency} ${data.amount} has been sent to your bank account.\n\nPayout Breakdown:\nTask Price: ${data.currency} ${data.taskPrice}\nCommission: -${data.currency} ${data.commission}\nService Fee: -${data.currency} ${data.serviceFee}\n\nPayout ID: ${data.payoutId}\nDate: ${data.date}\n\nPlease allow 1-3 business days for the funds to appear.\n\nThis is an automated notification.`
   };
 }
 
@@ -270,22 +290,24 @@ export function payoutFailedEmail(data: PayoutData) {
 
 // ─── Refund ─────────────────────────────────────────────────────────
 
-export function refundEmail(data: RefundData) {
+// ─── Full Refund — Poster ───────────────────────────────────────────
+
+export function fullRefundPosterEmail(data: RefundData) {
   const taskRow = data.taskId
     ? `${detailRow('Task ID', data.taskId)}<tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>`
     : '';
 
   const content = `
-    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#1a1a2e;">Refund Processed</h1>
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#1a1a2e;">Full Refund Processed</h1>
     <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#4a4a5a;">
-      A refund has been processed for your payment.
+      Your total payment (Task Price + Service Fee) has been fully refunded.
     </p>
 
     <!-- Amount highlight -->
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
       <tr>
         <td style="background-color:#f0f4f8;border-radius:6px;padding:20px;text-align:center;">
-          <p style="margin:0 0 4px;font-size:12px;color:#6b6b76;text-transform:uppercase;letter-spacing:1px;">Refund Amount</p>
+          <p style="margin:0 0 4px;font-size:12px;color:#6b6b76;text-transform:uppercase;letter-spacing:1px;">Total Refund Amount</p>
           <p style="margin:0;font-size:28px;font-weight:700;color:#1a1a2e;">${data.currency} ${data.amount}</p>
         </td>
       </tr>
@@ -298,7 +320,7 @@ export function refundEmail(data: RefundData) {
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
       ${detailRow('Date', data.date)}
       <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
-      ${detailRow('Status', statusBadge('REFUNDED', '#7c3aed', '#f3f0ff'))}
+      ${detailRow('Status', statusBadge('FULL REFUND', '#7c3aed', '#f3f0ff'))}
     </table>
 
     <p style="margin:0;font-size:13px;line-height:20px;color:#6b6b76;">
@@ -306,19 +328,65 @@ export function refundEmail(data: RefundData) {
     </p>`;
 
   return {
-    subject: `Refund Processed — ${data.currency} ${data.amount}`,
-    html: emailLayout('Refund Processed', content),
-    text: `Refund Processed\n\nA refund of ${data.currency} ${data.amount} has been processed.\n\n${data.taskId ? `Task ID: ${data.taskId}\n` : ''}Payment ID: ${data.paymentId}\nDate: ${data.date}\n\nPlease allow 5-10 business days for the refund to appear on your statement.\n\nThis is an automated notification.`
+    subject: `Full Refund Processed — ${data.currency} ${data.amount}`,
+    html: emailLayout('Full Refund Processed', content),
+    text: `Full Refund Processed\n\nYour total payment of ${data.currency} ${data.amount} has been fully refunded.\n\n${data.taskId ? `Task ID: ${data.taskId}\n` : ''}Payment ID: ${data.paymentId}\nDate: ${data.date}\n\nPlease allow 5-10 business days for the refund to appear on your statement.\n\nThis is an automated notification.`
   };
 }
 
-// ─── Penalty Applied — Tasker ───────────────────────────────────────
+// ─── Cancellation with Penalty — Poster ─────────────────────────────
 
-export function penaltyAppliedEmail(data: PenaltyData) {
+export function cancellationPenaltyPosterEmail(data: CancellationData) {
   const content = `
-    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#1a1a2e;">Penalty Applied</h1>
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#1a1a2e;">Cancellation Processed</h1>
     <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#4a4a5a;">
-      A task has been cancelled and a penalty has been applied to your account.
+      Your cancellation has been processed. As per the cancellation policy, a penalty has been applied.
+    </p>
+
+    <!-- Amount highlight -->
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:24px;">
+      <tr>
+        <td style="background-color:#f0f4f8;border-radius:6px;padding:20px;text-align:center;">
+          <p style="margin:0 0 4px;font-size:12px;color:#6b6b76;text-transform:uppercase;letter-spacing:1px;">Refund Amount</p>
+          <p style="margin:0;font-size:28px;font-weight:700;color:#1a1a2e;">${data.currency} ${data.refundAmount}</p>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Details table -->
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#fafbfc;border-radius:6px;border:1px solid #eaedf0;margin-bottom:24px;">
+      ${detailRow('Task ID', data.taskId)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Penalty Deducted', `${data.currency} ${data.penaltyDeducted}`)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Payment ID', data.paymentId)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Date', data.date)}
+      <tr><td colspan="2" style="border-bottom:1px solid #eaedf0;"></td></tr>
+      ${detailRow('Status', statusBadge('REFUNDED', '#7c3aed', '#f3f0ff'))}
+    </table>
+
+    <p style="margin:0;font-size:13px;line-height:20px;color:#6b6b76;">
+      The refund amount (Task Amount only) has been sent to your original payment method. The service fee is non-refundable.
+    </p>`;
+
+  return {
+    subject: `Cancellation Refund — ${data.currency} ${data.refundAmount}`,
+    html: emailLayout('Cancellation Processed', content),
+    text: `Cancellation Processed\n\nYour cancellation has been processed with a penalty applied.\n\nRefund Amount: ${data.currency} ${data.refundAmount}\nPenalty Deducted: ${data.currency} ${data.penaltyDeducted}\n\nTask ID: ${data.taskId}\nPayment ID: ${data.paymentId}\nDate: ${data.date}\n\nThe service fee is non-refundable.\n\nThis is an automated notification.`
+  };
+}
+
+// ─── Full Refund Notification — Tasker ──────────────────────────────
+
+export function fullRefundTaskerEmail(data: PenaltyData) {
+  const content = `
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#1a1a2e;">Task Cancelled & Refunded</h1>
+    <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#4a4a5a;">
+      A task assigned to you has been fully refunded to the poster. 
+    </p>
+    <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#4a4a5a;">
+      As a result, a penalty has been applied to your account. This amount will be adjusted/deducted from your next task payout.
     </p>
 
     <!-- Amount highlight -->
@@ -343,12 +411,12 @@ export function penaltyAppliedEmail(data: PenaltyData) {
     </table>
 
     <p style="margin:0;font-size:13px;line-height:20px;color:#6b6b76;">
-      This amount has been deducted from your account balance. If you believe this is an error, please contact support.
+      If you check your dashboard, you will see this deduction recorded.
     </p>`;
 
   return {
-    subject: `Penalty Applied — ${data.currency} ${data.penaltyAmount}`,
-    html: emailLayout('Penalty Applied', content),
-    text: `Penalty Applied\n\nA task has been cancelled and a penalty of ${data.currency} ${data.penaltyAmount} has been applied to your account.\n\nTask ID: ${data.taskId}\nPayment ID: ${data.paymentId}\nDate: ${data.date}\n\nIf you believe this is an error, please contact support.\n\nThis is an automated notification.`
+    subject: `Task Refunded — Penalty Applied`,
+    html: emailLayout('Task Refunded', content),
+    text: `Task Cancelled & Refunded\n\nA task assigned to you has been fully refunded to the poster.\n\nA penalty of ${data.currency} ${data.penaltyAmount} has been applied to your account and will be deducted from your next payout.\n\nTask ID: ${data.taskId}\nPayment ID: ${data.paymentId}\n\nThis is an automated notification.`
   };
 }

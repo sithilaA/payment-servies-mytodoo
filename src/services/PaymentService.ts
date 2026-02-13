@@ -11,10 +11,11 @@ import { AppError } from '../utils/AppError';
 import { emailService } from './EmailService';
 import {
     paymentSuccessPosterEmail,
-    paymentSuccessTaskerEmail,
+    // paymentSuccessTaskerEmail, // Removed: Only poster gets email on success
     payoutPaidEmail,
-    refundEmail,
-    penaltyAppliedEmail,
+    fullRefundPosterEmail, // Renamed from refundEmail
+    cancellationPenaltyPosterEmail, // New: For poster cancellation with penalty
+    fullRefundTaskerEmail, // New: For tasker cancellation with full refund + penalty
 } from '../utils/notificationEmails';
 
 // Helper to record failed refund requests
@@ -157,12 +158,15 @@ export class PaymentService {
                         logger.error('Notification email failed (poster, payment)', { error: (e as any).message })
                     );
                 }
+                // Removed Tasker Email Logic per requirements
+                /* 
                 if (taskerEmail) {
                     const { subject, html, text } = paymentSuccessTaskerEmail(emailData);
                     emailService.sendHtmlEmail(taskerEmail, subject, html, text).catch(e =>
                         logger.error('Notification email failed (tasker, payment)', { error: (e as any).message })
                     );
                 }
+                */
             }
 
             return {
@@ -411,6 +415,15 @@ The payout will be automatically triggered when the user updates their payment d
                         amount: taskerPendingAmount.toFixed(2),
                         currency: settings.currency,
                         date: new Date().toISOString().split('T')[0],
+                        // Added breakdown for clarity (Task Price - Commission - Poster's Service Fee)
+                        // Note: Current backend model: Payment.amount includes service_fee. 
+                        // Logic: payment.amount = task_price + service_fee.
+                        // So task_price = payment.amount - service_fee. 
+                        // Payout = task_price - commission.
+                        taskPrice: (Number(payment.amount) - Number(payment.service_fee)).toFixed(2),
+                        commission: Number(payment.commission).toFixed(2),
+                        serviceFee: Number(payment.service_fee).toFixed(2) // We display poster service fee as info, or 0 if "tasker service fee" is meant to be implicit.
+                        // Since user asked for "Tasker Service Fee", but only poster fee exists, we show what we have.
                     });
                     emailService.sendHtmlEmail(payment.tasker_email, subject, html, text).catch(e =>
                         logger.error('Notification email failed (tasker, payout)', { error: (e as any).message })
@@ -498,9 +511,11 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, html, text } = refundEmail({
+                    // Use cancellationPenaltyPosterEmail for CANCEL (partial refund)
+                    const { subject, html, text } = cancellationPenaltyPosterEmail({
                         taskId: task_id,
-                        amount: refundAmount.toFixed(2),
+                        refundAmount: refundAmount.toFixed(2),
+                        penaltyDeducted: feePart.toFixed(2), // The service fee is the "penalty" here effectively
                         currency: settings.currency,
                         paymentId: payment.id,
                         date: new Date().toISOString().split('T')[0],
@@ -584,11 +599,11 @@ The payout will be automatically triggered when the user updates their payment d
                 await transaction.commit();
                 logger.info('CANCEL_FULL: Complete', { task_id, penalty });
 
-                // Fire-and-forget: refund notification to poster
+                // Fire-and-forget: full refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, html, text } = refundEmail({
+                    const { subject, html, text } = fullRefundPosterEmail({ // Updated function name
                         taskId: task_id,
-                        amount: Number(payment.amount).toFixed(2),
+                        amount: Number(payment.amount).toFixed(2), // Full Amount
                         currency: settings.currency,
                         paymentId: payment.id,
                         date: new Date().toISOString().split('T')[0],
@@ -600,7 +615,7 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: penalty notification to tasker
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.tasker_email) {
-                    const { subject, html, text } = penaltyAppliedEmail({
+                    const { subject, html, text } = fullRefundTaskerEmail({ // Updated to new template
                         taskId: task_id,
                         penaltyAmount: penalty.toFixed(2),
                         currency: settings.currency,
@@ -678,7 +693,7 @@ The payout will be automatically triggered when the user updates their payment d
 
                 // Fire-and-forget: refund notification to poster
                 if (process.env.NOTIFICATION_EMAILS_ENABLED !== 'false' && payment.poster_email) {
-                    const { subject, html, text } = refundEmail({
+                    const { subject, html, text } = fullRefundPosterEmail({ // Updated function name
                         taskId: task_id,
                         amount: Number(payment.amount).toFixed(2),
                         currency: settings.currency,
