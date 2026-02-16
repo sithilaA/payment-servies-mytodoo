@@ -31,6 +31,37 @@ router.post('/users/payout-details', UserController.updatePayoutDetails);
 
 /**
  * @swagger
+ * /users/balance/{external_user_id}:
+ *   get:
+ *     summary: Get User Balance
+ *     description: Retrieve available and pending balance for a user.
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: external_user_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Balance details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     balance: { type: number }
+ *                     pending_balance: { type: number }
+ *                     currency: { type: string }
+ */
+router.get('/users/balance/:external_user_id', UserController.getBalance);
+
+/**
+ * @swagger
  * /payments/create:
  *   post:
  *     summary: Create Task Payment (Pending)

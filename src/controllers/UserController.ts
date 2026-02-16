@@ -179,4 +179,26 @@ export class UserController {
 
     res.json({ success: true, message: "Payout details updated and pending payouts triggered." });
   });
+
+  /**
+   * Get User Balance
+   */
+  static getBalance = serviceHandler(async (req: Request, res: Response) => {
+    const { external_user_id } = req.params;
+
+    if (!external_user_id) {
+      throw new AppError("Missing external_user_id", 400);
+    }
+
+    const wallet = await walletService.getOrCreate(external_user_id as string, external_user_id as string, 'customer'); // Role doesn't matter for fetch
+
+    res.json({
+      success: true,
+      data: {
+        balance: wallet.available_balance,
+        pending_balance: wallet.pending_balance,
+        currency: wallet.currency
+      }
+    });
+  });
 }
