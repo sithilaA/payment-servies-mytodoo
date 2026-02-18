@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { settings } from '../config/settings';
 import { AppError } from '../utils/AppError';
 import { emailService } from './EmailService';
+import { FinancialService } from './FinancialService';
 import {
     paymentSuccessPosterEmail,
     // paymentSuccessTaskerEmail, // Removed: Only poster gets email on success
@@ -168,6 +169,15 @@ export class PaymentService {
                 }
                 */
             }
+
+            // Fire-and-forget: Record in new financial tables
+            FinancialService.recordPaymentCreated({
+                task_id,
+                poster_user_id: poster_id,
+                tasker_user_id: tasker_id,
+                task_price: Number(task_price),
+                total_payment: totalAmount
+            }).catch(e => logger.error('FinancialService.recordPaymentCreated fire-and-forget error', { error: (e as any)?.message }));
 
             return {
                 message: "Payment created, funds held.",
@@ -429,6 +439,13 @@ The payout will be automatically triggered when the user updates their payment d
                     );
                 }
 
+                // Fire-and-forget: Record task completion in new financial tables
+                FinancialService.recordTaskCompleted({
+                    task_id,
+                    tasker_user_id: taskerWallet.external_user_id,
+                    payout_amount: taskerPendingAmount
+                }).catch(e => logger.error('FinancialService.recordTaskCompleted fire-and-forget error', { error: (e as any)?.message }));
+
                 return { success: true, status: responseStatus, message: responseMessage };
 
             } else if (action === 'CANCEL') {
@@ -523,6 +540,13 @@ The payout will be automatically triggered when the user updates their payment d
                         logger.error('Notification email failed (poster, cancel refund)', { error: (e as any).message })
                     );
                 }
+
+                // Fire-and-forget: Record refund in new financial tables
+                FinancialService.recordRefund({
+                    task_id,
+                    poster_user_id: poster_id,
+                    refund_amount: refundAmount
+                }).catch(e => logger.error('FinancialService.recordRefund fire-and-forget error', { error: (e as any)?.message }));
 
                 return { success: true, status: 'CANCELLED', refund_amount: refundAmount, fee_kept: feePart };
 
@@ -626,6 +650,16 @@ The payout will be automatically triggered when the user updates their payment d
                     );
                 }
 
+                // Fire-and-forget: Record refund with penalty in new financial tables
+                FinancialService.recordRefundWithPenalty({
+                    task_id,
+                    poster_user_id: poster_id,
+                    tasker_user_id: taskerWallet.external_user_id,
+                    refund_amount: Number(payment.amount),
+                    penalty_amount: penalty,
+                    penalty_owner: 'tasker'
+                }).catch(e => logger.error('FinancialService.recordRefundWithPenalty fire-and-forget error', { error: (e as any)?.message }));
+
                 return { success: true, status: 'CANCELLED_FULL', refund_amount: Number(payment.amount), penalty };
 
             } else if (action === 'REFUND') {
@@ -703,6 +737,13 @@ The payout will be automatically triggered when the user updates their payment d
                         logger.error('Notification email failed (poster, refund)', { error: (e as any).message })
                     );
                 }
+
+                // Fire-and-forget: Record full refund in new financial tables
+                FinancialService.recordRefund({
+                    task_id,
+                    poster_user_id: poster_id,
+                    refund_amount: Number(payment.amount)
+                }).catch(e => logger.error('FinancialService.recordRefund fire-and-forget error (REFUND)', { error: (e as any)?.message }));
 
                 return { success: true, status: 'REFUNDED', refund_amount: Number(payment.amount) };
 

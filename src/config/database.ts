@@ -15,6 +15,9 @@ import { FailedRequestAdminReview } from '../models/FailedRequestAdminReview';
 import { StripeErrorCode } from '../models/StripeErrorCode';
 import { FailedPayout } from '../models/FailedPayout';
 import { FailedRefundRequest } from '../models/FailedRefundRequest';
+import { TaskerList } from '../models/TaskerList';
+import { PosterList } from '../models/PosterList';
+import { TaskFinancialHistory } from '../models/TaskFinancialHistory';
 
 dotenv.config();
 
@@ -25,7 +28,7 @@ export const sequelize = new Sequelize({
   username: process.env.DB_USER || 'root',
   password: process.env.DB_PASS || 'password',
   database: process.env.DB_NAME || 'payment_service',
-  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview, FailedRefundRequest],
+  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview, FailedRefundRequest, TaskerList, PosterList, TaskFinancialHistory],
   logging: false, // Set to console.log to see SQL queries
   pool: {
     max: 5,
