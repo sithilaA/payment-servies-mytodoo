@@ -176,7 +176,8 @@ export class PaymentService {
                 poster_user_id: poster_id,
                 tasker_user_id: tasker_id,
                 task_price: Number(task_price),
-                total_payment: totalAmount
+                total_payment: totalAmount,
+                tasker_pending_amount: taskerPendingAmount
             }).catch(e => logger.error('FinancialService.recordPaymentCreated fire-and-forget error', { error: (e as any)?.message }));
 
             return {
@@ -545,7 +546,9 @@ The payout will be automatically triggered when the user updates their payment d
                 FinancialService.recordRefund({
                     task_id,
                     poster_user_id: poster_id,
-                    refund_amount: refundAmount
+                    tasker_user_id: taskerWallet.external_user_id,
+                    refund_amount: refundAmount,
+                    tasker_pending_amount: taskerPendingAmount
                 }).catch(e => logger.error('FinancialService.recordRefund fire-and-forget error', { error: (e as any)?.message }));
 
                 return { success: true, status: 'CANCELLED', refund_amount: refundAmount, fee_kept: feePart };
@@ -657,7 +660,8 @@ The payout will be automatically triggered when the user updates their payment d
                     tasker_user_id: taskerWallet.external_user_id,
                     refund_amount: Number(payment.amount),
                     penalty_amount: penalty,
-                    penalty_owner: 'tasker'
+                    penalty_owner: 'tasker',
+                    tasker_pending_amount: taskerPendingAmount
                 }).catch(e => logger.error('FinancialService.recordRefundWithPenalty fire-and-forget error', { error: (e as any)?.message }));
 
                 return { success: true, status: 'CANCELLED_FULL', refund_amount: Number(payment.amount), penalty };
@@ -742,7 +746,9 @@ The payout will be automatically triggered when the user updates their payment d
                 FinancialService.recordRefund({
                     task_id,
                     poster_user_id: poster_id,
-                    refund_amount: Number(payment.amount)
+                    tasker_user_id: taskerWallet.external_user_id,
+                    refund_amount: Number(payment.amount),
+                    tasker_pending_amount: taskerPendingAmount
                 }).catch(e => logger.error('FinancialService.recordRefund fire-and-forget error (REFUND)', { error: (e as any)?.message }));
 
                 return { success: true, status: 'REFUNDED', refund_amount: Number(payment.amount) };

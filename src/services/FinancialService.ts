@@ -26,12 +26,13 @@ export class FinancialService {
         tasker_user_id: string;
         task_price: number;
         total_payment: number; // task_price + service_fee (what poster actually paid)
+        tasker_pending_amount: number; // task_price - commission (what tasker will earn)
     }): Promise<void> {
         try {
-            const { task_id, poster_user_id, tasker_user_id, task_price, total_payment } = data;
+            const { task_id, poster_user_id, tasker_user_id, task_price, total_payment, tasker_pending_amount } = data;
 
             // Upsert poster_list
-            const [poster, created] = await PosterList.findOrCreate({
+            const [poster, posterCreated] = await PosterList.findOrCreate({
                 where: { user_id: poster_user_id },
                 defaults: {
                     user_id: poster_user_id,
@@ -42,11 +43,29 @@ export class FinancialService {
                 }
             });
 
-            if (!created) {
+            if (!posterCreated) {
                 await poster.increment('total_payment', { by: total_payment });
                 await poster.increment('current_balance', { by: total_payment });
                 poster.last_updated_at = new Date();
                 await poster.save();
+            }
+
+            // Upsert tasker_list (pending_payout)
+            const [tasker, taskerCreated] = await TaskerList.findOrCreate({
+                where: { user_id: tasker_user_id },
+                defaults: {
+                    user_id: tasker_user_id,
+                    total_payout: 0,
+                    pending_payout: tasker_pending_amount,
+                    current_balance: 0,
+                    last_updated_at: new Date()
+                }
+            });
+
+            if (!taskerCreated) {
+                await tasker.increment('pending_payout', { by: tasker_pending_amount });
+                tasker.last_updated_at = new Date();
+                await tasker.save();
             }
 
             // Create task_financial_history
@@ -81,18 +100,10 @@ export class FinancialService {
         try {
             const { task_id, tasker_user_id, payout_amount } = data;
 
-            // Upsert tasker_list
-            const [tasker, created] = await TaskerList.findOrCreate({
-                where: { user_id: tasker_user_id },
-                defaults: {
-                    user_id: tasker_user_id,
-                    total_payout: payout_amount,
-                    current_balance: payout_amount,
-                    last_updated_at: new Date()
-                }
-            });
-
-            if (!created) {
+            // Update tasker_list: move from pending to completed payout
+            const tasker = await TaskerList.findOne({ where: { user_id: tasker_user_id } });
+            if (tasker) {
+                await tasker.decrement('pending_payout', { by: payout_amount });
                 await tasker.increment('total_payout', { by: payout_amount });
                 await tasker.increment('current_balance', { by: payout_amount });
                 tasker.last_updated_at = new Date();
@@ -122,10 +133,12 @@ export class FinancialService {
     static async recordRefund(data: {
         task_id: string;
         poster_user_id: string;
+        tasker_user_id: string;
         refund_amount: number;
+        tasker_pending_amount: number; // Amount to remove from tasker's pending_payout
     }): Promise<void> {
         try {
-            const { task_id, poster_user_id, refund_amount } = data;
+            const { task_id, poster_user_id, tasker_user_id, refund_amount, tasker_pending_amount } = data;
 
             // Update poster_list
             const poster = await PosterList.findOne({ where: { user_id: poster_user_id } });
@@ -134,6 +147,14 @@ export class FinancialService {
                 await poster.decrement('current_balance', { by: refund_amount });
                 poster.last_updated_at = new Date();
                 await poster.save();
+            }
+
+            // Update tasker_list: remove pending_payout
+            const tasker = await TaskerList.findOne({ where: { user_id: tasker_user_id } });
+            if (tasker) {
+                await tasker.decrement('pending_payout', { by: tasker_pending_amount });
+                tasker.last_updated_at = new Date();
+                await tasker.save();
             }
 
             // Update task_financial_history
@@ -164,9 +185,10 @@ export class FinancialService {
         refund_amount: number;
         penalty_amount: number;
         penalty_owner: 'tasker' | 'poster';
+        tasker_pending_amount: number; // Amount to remove from tasker's pending_payout
     }): Promise<void> {
         try {
-            const { task_id, poster_user_id, tasker_user_id, refund_amount, penalty_amount, penalty_owner } = data;
+            const { task_id, poster_user_id, tasker_user_id, refund_amount, penalty_amount, penalty_owner, tasker_pending_amount } = data;
 
             // Update poster_list
             const poster = await PosterList.findOne({ where: { user_id: poster_user_id } });
@@ -177,18 +199,10 @@ export class FinancialService {
                 await poster.save();
             }
 
-            // Update tasker_list (penalty deduction)
-            const [tasker, created] = await TaskerList.findOrCreate({
-                where: { user_id: tasker_user_id },
-                defaults: {
-                    user_id: tasker_user_id,
-                    total_payout: 0,
-                    current_balance: -penalty_amount, // Starts negative due to penalty
-                    last_updated_at: new Date()
-                }
-            });
-
-            if (!created) {
+            // Update tasker_list: remove pending_payout and apply penalty
+            const tasker = await TaskerList.findOne({ where: { user_id: tasker_user_id } });
+            if (tasker) {
+                await tasker.decrement('pending_payout', { by: tasker_pending_amount });
                 await tasker.decrement('current_balance', { by: penalty_amount });
                 tasker.last_updated_at = new Date();
                 await tasker.save();

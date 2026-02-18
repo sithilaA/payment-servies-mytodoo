@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PaymentController } from '../controllers/PaymentController';
 import { CompanyController } from '../controllers/CompanyController';
 import { UserController } from '../controllers/UserController';
+import { FinancialController } from '../controllers/FinancialController';
 
 const router = Router();
 
@@ -29,22 +30,25 @@ const router = Router();
  */
 router.post('/users/payout-details', UserController.updatePayoutDetails);
 
+// --- Financial Summary Endpoints ---
+
 /**
  * @swagger
- * /users/balance/{external_user_id}:
+ * /taskers/financial/{external_user_id}:
  *   get:
- *     summary: Get User Balance
- *     description: Retrieve available and pending balance for a user.
- *     tags: [Users]
+ *     summary: Get Tasker Financial Summary
+ *     description: Fetch financial summary for a tasker from the tasker_list table.
+ *     tags: [Financial]
  *     parameters:
  *       - in: path
  *         name: external_user_id
  *         required: true
  *         schema:
  *           type: string
+ *         description: External auth user ID of the tasker
  *     responses:
  *       200:
- *         description: Balance details
+ *         description: Tasker financial summary
  *         content:
  *           application/json:
  *             schema:
@@ -54,11 +58,108 @@ router.post('/users/payout-details', UserController.updatePayoutDetails);
  *                 data:
  *                   type: object
  *                   properties:
- *                     balance: { type: number }
- *                     pending_balance: { type: number }
- *                     currency: { type: string }
+ *                     user_id: { type: string }
+ *                     total_payout: { type: number }
+ *                     pending_payout: { type: number }
+ *                     current_balance: { type: number }
  */
-router.get('/users/balance/:external_user_id', UserController.getBalance);
+router.get('/taskers/financial/:external_user_id', FinancialController.getTaskerFinancial);
+
+/**
+ * @swagger
+ * /posters/financial/{external_user_id}:
+ *   get:
+ *     summary: Get Poster Financial Summary
+ *     description: Fetch financial summary for a poster from the poster_list table.
+ *     tags: [Financial]
+ *     parameters:
+ *       - in: path
+ *         name: external_user_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: External auth user ID of the poster
+ *     responses:
+ *       200:
+ *         description: Poster financial summary
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user_id: { type: string }
+ *                     total_payment: { type: number }
+ *                     total_refund: { type: number }
+ *                     current_balance: { type: number }
+ */
+router.get('/posters/financial/:external_user_id', FinancialController.getPosterFinancial);
+
+/**
+ * @swagger
+ * /tasks/financial-history:
+ *   get:
+ *     summary: Get Task Financial History (Paginated)
+ *     description: |
+ *       Fetch records from task_financial_history table.
+ *       Supports filtering by poster or tasker user ID.
+ *       Returns paginated task-level financial data.
+ *     tags: [Financial]
+ *     parameters:
+ *       - in: query
+ *         name: poster_user_id
+ *         schema:
+ *           type: string
+ *         description: Filter by poster external user ID
+ *       - in: query
+ *         name: tasker_user_id
+ *         schema:
+ *           type: string
+ *         description: Filter by tasker external user ID
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (starts at 1)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Records per page (max 100)
+ *     responses:
+ *       200:
+ *         description: Paginated task financial history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       task_id: { type: string }
+ *                       poster_user_id: { type: string }
+ *                       tasker_user_id: { type: string }
+ *                       task_price: { type: number }
+ *                       status: { type: string, enum: [complete, refund, refund_with_penalty, payout_complete] }
+ *                       penalty_owner: { type: string, enum: [tasker, poster, none] }
+ *                       penalty_amount: { type: number }
+ *                       refund_amount: { type: number }
+ *                       payout_amount: { type: number }
+ *                       created_at: { type: string, format: date-time }
+ *                 total_records: { type: integer }
+ *                 total_pages: { type: integer }
+ *                 current_page: { type: integer }
+ */
+router.get('/tasks/financial-history', FinancialController.getTaskFinancialHistory);
 
 /**
  * @swagger

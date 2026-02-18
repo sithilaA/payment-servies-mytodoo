@@ -33,6 +33,13 @@ export class TaskerList extends Model {
         type: DataType.DECIMAL(19, 4),
         allowNull: false
     })
+    pending_payout!: number;
+
+    @Default(0)
+    @Column({
+        type: DataType.DECIMAL(19, 4),
+        allowNull: false
+    })
     current_balance!: number;
 
     @Column({

@@ -42,9 +42,9 @@ export class TaskFinancialHistory extends Model {
     })
     task_price!: number;
 
-    @Default('complete')
+    @Default('pending')
     @Column({
-        type: DataType.ENUM('complete', 'refund', 'refund_with_penalty', 'payout_complete'),
+        type: DataType.ENUM('pending', 'complete', 'refund', 'refund_with_penalty', 'payout_complete'),
         allowNull: false
     })
     status!: string;

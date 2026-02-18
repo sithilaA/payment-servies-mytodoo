@@ -8,6 +8,7 @@ import { Payout } from '../models/Payout';
 import { Escrow } from '../models/Escrow';
 import { PlatformAccount } from '../models/PlatformAccount';
 import { Payment } from '../models/Payment';
+import { Refund } from '../models/Refund';
 
 import { PendingPayout } from '../models/PendingPayout';
 
@@ -28,7 +29,7 @@ export const sequelize = new Sequelize({
   username: process.env.DB_USER || 'root',
   password: process.env.DB_PASS || 'password',
   database: process.env.DB_NAME || 'payment_service',
-  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview, FailedRefundRequest, TaskerList, PosterList, TaskFinancialHistory],
+  models: [Wallet, Transaction, Earning, Payout, Escrow, PlatformAccount, Payment, Refund, StripeErrorCode, FailedPayout, PendingPayout, FailedRequestAdminReview, FailedRefundRequest, TaskerList, PosterList, TaskFinancialHistory],
   logging: false, // Set to console.log to see SQL queries
   pool: {
     max: 5,
