@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { TaskerList } from '../models/TaskerList';
 import { PosterList } from '../models/PosterList';
 import { TaskFinancialHistory } from '../models/TaskFinancialHistory';
+import { Payment } from '../models/Payment';
 import { serviceHandler } from '../utils';
 import { AppError } from '../utils/AppError';
 
@@ -99,11 +101,32 @@ export class FinancialController {
             offset
         });
 
+        // Enrich each row with amount, service_fee, commission from payments table
+        const taskIds = rows.map(r => r.task_id);
+        const payments = taskIds.length > 0
+            ? await Payment.findAll({
+                where: { related_task_id: { [Op.in]: taskIds } },
+                attributes: ['related_task_id', 'amount', 'service_fee', 'commission']
+            })
+            : [];
+        const paymentMap = new Map(payments.map(p => [p.related_task_id, p]));
+
+        const enrichedRows = rows.map(row => {
+            const plain = row.toJSON();
+            const pay = paymentMap.get(plain.task_id);
+            return {
+                ...plain,
+                amount: pay ? Number(pay.amount) : 0,
+                service_fee: pay ? Number(pay.service_fee) : 0,
+                commission: pay ? Number(pay.commission) : 0
+            };
+        });
+
         const totalPages = Math.ceil(count / limitNum);
 
         res.json({
             success: true,
-            data: rows,
+            data: enrichedRows,
             total_records: count,
             total_pages: totalPages,
             current_page: pageNum

@@ -218,13 +218,20 @@ async function runAllTests() {
         assert(Number(d.pending_payout) === expectedPending, `Expected pending_payout=${expectedPending}, got ${d.pending_payout}`);
     });
 
-    await test('Financial history has 3 records with status=pending', async () => {
+    await test('Financial history has 3 records with status=pending and payment fields', async () => {
         const res = await httpRequest('GET', `${API_PREFIX}/tasks/financial-history?poster_user_id=${POSTER_ID}`);
         setResponse(res);
         assert(res.status === 200, `Expected 200, got ${res.status}`);
         assert(res.data.total_records === 3, `Expected 3 records, got ${res.data.total_records}`);
         const allPending = res.data.data.every((r: any) => r.status === 'pending');
         assert(allPending, 'Expected all records to have status=pending');
+
+        // Verify enriched payment fields on each record
+        for (const record of res.data.data) {
+            assert(Number(record.amount) === TOTAL_AMOUNT, `Expected amount=${TOTAL_AMOUNT}, got ${record.amount}`);
+            assert(Number(record.service_fee) === SERVICE_FEE, `Expected service_fee=${SERVICE_FEE}, got ${record.service_fee}`);
+            assert(Number(record.commission) === COMMISSION, `Expected commission=${COMMISSION}, got ${record.commission}`);
+        }
     });
 
     // ── 4. COMPLETE Action ───────────────────────────────────────────

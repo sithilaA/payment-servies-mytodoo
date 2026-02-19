@@ -149,6 +149,9 @@ router.get('/posters/financial/:external_user_id', FinancialController.getPoster
  *                       poster_user_id: { type: string }
  *                       tasker_user_id: { type: string }
  *                       task_price: { type: number }
+ *                       amount: { type: number, description: "Total amount paid (from payments table)" }
+ *                       service_fee: { type: number, description: "Service fee (from payments table)" }
+ *                       commission: { type: number, description: "Commission (from payments table)" }
  *                       status: { type: string, enum: [complete, refund, refund_with_penalty, payout_complete] }
  *                       penalty_owner: { type: string, enum: [tasker, poster, none] }
  *                       penalty_amount: { type: number }
